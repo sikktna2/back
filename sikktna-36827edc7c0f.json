@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "sikktna",
+  "private_key_id": "36827edc7c0f320a4001cce070f20df053dd4c94",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDGdFE3+/4G5AnX\nyS1Hm17C0iW6cyX9zTTpdv2N/dgOJ5kzgZFZwaiINZYOaDXteRbWBWutyXT1455b\nFAMoC1fiHFBAoI8ALFbmIqwrkZfrVtm8Bx+TuxXK6PGZMa9EIkSwtDYuqeQXlF+l\nJ9XFpwcsASXG15TlyAUgWuEYVkz9l8wSw1o18YUE9mxVdrV2bVvpyMAQV+3ov/ow\nEjRSSnlOzK8kVbndoYgzZQmjsRu2J78EMpDTHYbF/tsaSXJVYngo19G0dl9SNjDy\n5Kz+f9tT8IfflEV1sTc4qPuoEigoaLlmLpinmu1Qjq93fwPcT/x+oY9UaQ+Vg0re\ns+H9JOFzAgMBAAECggEAKGGvyyQIFy/cvt9tSsZXPG5VhgB7SQ8yBpWTV4rBJXQy\nTNQ/FtP8rqa0v36+BnHezzLwK780APrNlLvYPpQ8UEKxo8zn/EGJdy+z9/OaxaT5\nDjUm3EEz2IOY8bK19rfAYXJyGgGw64liAvG9oofvwikDnlfssOsH/ALyDak15l3a\nwFQ8yg6I4GoJ8Q33RJHKeZwjhfJvXLJvM9TMG11ysqapAHO4s8hwAOF3ap8HE9NR\npIcGK6nsE9GIHtEzV1u1jykDRWUQq9vrI9bU2USLB3/u+G7+wNvJkg3DsfRpMHuI\n2F0RYtYrDtwKR+h31Ojy2fNMQBi8kBcTesBLDjBcfQKBgQDoGQHPbLuy6PjTyBAG\nXdxxDxim/ACKHYeCmX9OcBNQ2e3z2AMoQeLj3zISMiU7nn32crJvUVzrLnd3IQqk\na78OdFz+tKLrnO8XQkxzvSduSg5+8KS27bOWeMNtZBkRk2p+9b0truBmnHlzwr78\ny1OTNOiqocNbAQGxitc78MZzzwKBgQDa5FeVKnSWEnONzOCbVQQUISNkUeqJnmZX\nC1uo/2THOPCrDjAC7W8wq9LmUXgvZcb9/JPXn8Fchomb4y6UdwDRIXWG9lYV4oNy\nHYSteKTkGMpAIvNL67yoTn6KXUW/iSnbQ1d1eWAe2Qj5K7BvZOZW5jjRSD+zH90D\nXWg5J4PNHQKBgHPNfly7GM/Ec9pfGLfEfyed66PtWmuPHjyoT5+YRdryUUp3/eNJ\nNGaTx0zS3kbn5ltfkO3/v4fMUGkNAF1XMSWKI5gmEp/SVmzZdIHO3+ykYKUvdk+b\nPB6YtJFQ/z0Iu3sLK0+u0GICMoryoQ5KeLGbFXeFbI5sayblakyK7sl7AoGAN8Hu\npWqZJBkzIi3MEQVI8q+2Sjmrmr6kpwuXn6bezvisJYaJqFU++5DpOg4KpVgxpkUO\ni+B/6sfCidkG5n6h0KPLQkPBjfWTMiBeyalvp0LBUjEU9IPqHJ1SEoDL4YxZAydW\nQfBXEcSLSp1cZiO3oO8oDfdvcnttWwwSHmz4X+kCgYEAsbS/pio84Vg+f7nU83N7\nZALY2RyMLJq5nCDNfoUv5tNEzOUmIwRR5SQ728igWXGrELyTDhVhncf2ayvl3Jnr\ng87ZzrnZYjTZX37Pq5Q5kubWK+PlRuqBw07WoqSqkURECX9y2B4ZoDiCszyhK3JI\nz6DS0+m3lZQoj8hf4DZGDh8=\n-----END PRIVATE KEY-----\n",
+  "client_email": "rideshare-backend-service@sikktna.iam.gserviceaccount.com",
+  "client_id": "112304464667620009980",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/rideshare-backend-service%40sikktna.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
