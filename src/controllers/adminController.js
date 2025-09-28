@@ -112,12 +112,10 @@ export const respondToUserVerification = async (req, res) => {
 
         // --- START: NEW NOTIFICATION LOGIC ---
         await sendNotificationToUser(updatedUser.id, {
-            title: `Identity Verification ${status}`,
-            message: `Your identity documents have been reviewed. The status is now: ${status}.`,
-            type: 'ID_VERIFICATION',
-            userId: updatedUser.id,
-            relatedId: updatedUser.id,
-        });
+  type: 'ID_VERIFICATION',
+  relatedId: updatedUser.id,
+  data: { status: status },
+});
         // --- END: NEW NOTIFICATION LOGIC ---
 
         res.status(200).json(updatedUser);
@@ -147,12 +145,10 @@ export const respondToCarVerification = async (req, res) => {
 
         // --- START: NEW NOTIFICATION LOGIC ---
         await sendNotificationToUser(updatedCar.userId, {
-            title: `Car Verification ${status}`,
-            message: `Your car documents have been reviewed. The status is now: ${status}.`,
-            type: 'CAR_VERIFICATION',
-            userId: updatedCar.userId,
-            relatedId: updatedCar.id,
-        });
+  type: 'CAR_VERIFICATION',
+  relatedId: updatedCar.id,
+  data: { status: status },
+});
         // --- END: NEW NOTIFICATION LOGIC ---
 
         res.status(200).json(updatedCar);
@@ -582,4 +578,74 @@ export const updateConfig = async (req, res) => {
         console.error("Admin: Update Config Error:", error);
         res.status(500).json({ error: 'Failed to update configuration.' });
     }
+};
+
+export const importUsers = async (req, res) => {
+  // We expect the frontend to send an array of user objects
+  const { users } = req.body;
+
+  if (!users || !Array.isArray(users) || users.length === 0) {
+    return res.status(400).json({ error: 'User data must be a non-empty array.' });
+  }
+
+  let createdCount = 0;
+  let updatedCount = 0;
+
+  try {
+    // Use a transaction to ensure all records are processed or none are (atomicity)
+    await prisma.$transaction(async (tx) => {
+      for (const user of users) {
+        // Skip empty rows that might come from the CSV parser
+        if (!user.email && !user.id) {
+            continue;
+        }
+
+        // IMPORTANT SECURITY NOTE:
+        // We will NOT import passwords from the CSV. 
+        // If a new user is created, they must use the "Forgot Password" flow.
+        // The 'password' field is deliberately removed here.
+        const { password, ...userData } = user;
+
+        const result = await tx.user.upsert({
+          // Try to find an existing user by their email (must be unique)
+          where: { email: userData.email },
+          // If found, update their data
+          update: {
+            name: userData.name,
+            phone: userData.phone,
+            isVerified: userData.isVerified === 'true' || userData.isVerified === true, // Handle string from CSV
+            isPremium: userData.isPremium === 'true' || userData.isPremium === true,
+          },
+          // If not found, create a new user
+          create: {
+            ...userData,
+            // Ensure boolean values are correct
+            isVerified: userData.isVerified === 'true' || userData.isVerified === true,
+            isPremium: userData.isPremium === 'true' || userData.isPremium === true,
+            // Set a placeholder password. The user must use "Forgot Password".
+            password: 'imported_user_password_needs_reset', 
+          },
+        });
+        
+        // Check if the operation was a create or an update for counting
+        if (result.createdAt.getTime() === result.updatedAt.getTime()) {
+            createdCount++;
+        } else {
+            updatedCount++;
+        }
+      }
+    });
+
+    res.status(200).json({ 
+        message: `Import successful. Created: ${createdCount}, Updated: ${updatedCount}.` 
+    });
+
+  } catch (error) {
+    console.error("Admin: Import Users Error:", error);
+    // If the error is due to a duplicate key or other data constraint
+    if (error.code === 'P2002') {
+        return res.status(409).json({ error: `A user with email "${error.meta.target}" already exists.` });
+    }
+    res.status(500).json({ error: 'Failed to import users.' });
+  }
 };

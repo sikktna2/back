@@ -10,7 +10,7 @@
     "prisma:migrate": "prisma migrate dev --name init",
     "db:seed": "node src/seed.js",
     "test": "npx cross-env NODE_ENV=test npx jest --testTimeout=10000 --detectOpenHandles",
-    "test:setup": "npx cross-env NODE_ENV=test npx prisma db push"
+   "test:setup": "npx prisma db push --schema=./prisma/schema.prisma --accept-data-loss"
   },
   "dependencies": {
     "@mapbox/polyline": "^1.2.1",

@@ -141,19 +141,37 @@ process.on('SIGINT', async () => {
  * @param {object} notificationData - The data for the notification object.
  */
 // --- START: MODIFICATION (Socket.io Helper and Connection Logic) ---
-export const sendNotificationToUser = async (userId, notificationData) => {
-  console.log(`[Socket] Preparing to send notification of type ${notificationData.type} to user ${userId}.`);
+export const sendNotificationToUser = async (userId, notificationPayload) => {
+  console.log(`[Socket] Preparing to send notification of type ${notificationPayload.type} to user ${userId}.`);
   try {
-    const t = translations[lang];
-     const notificationTitle = t.notification_titles[notificationData.type] || notificationData.title;
-    const notificationMessage = t.notification_messages[notificationData.type] || notificationData.message;
-   
-    // Step 1: Always save the notification to the database first.
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { preferredLanguage: true }
+    });
+
+    const lang = user?.preferredLanguage || 'en';
+    const t = translations[lang] || translations['en'];
+
+    let title = t.notification_titles[notificationPayload.type] || 'Notification';
+    let message = t.notification_messages[notificationPayload.type] || 'You have a new update.';
+
+    // Interpolate data into the message strings
+    if (notificationPayload.data) {
+      for (const key in notificationPayload.data) {
+        const regex = new RegExp(`{${key}}`, 'g');
+        title = title.replace(regex, notificationPayload.data[key]);
+        message = message.replace(regex, notificationPayload.data[key]);
+      }
+    }
+
     const notification = await prisma.notification.create({
       data: {
-        ...notificationData,
-        title: notificationTitle,
-        message: notificationMessage,
+        userId: userId,
+        type: notificationPayload.type,
+        title: title,
+        message: message,
+        relatedId: notificationPayload.relatedId,
+        bookingStatus: notificationPayload.bookingStatus,
       },
     });
 
@@ -640,13 +658,11 @@ app.get('/rides/map/lightweight', authenticate, async (req, res) => {
     console.log(`CACHE MISS for key: ${cacheKey}`);
 
     // <-- Pass isRequest to the function
-    const ridesData = await getLightweightMapRides({
-      swLat,
-      swLng,
-      neLat,
-      neLng,
-      isRequest, 
-    });
+    // NEW CALL WITH userId
+const ridesData = await getLightweightMapRides({
+  swLat, swLng, neLat, neLng, isRequest, 
+  userId: req.user.userId, // تمرير معرّف المستخدم
+});
 
     if (redisClient.isReady) {
         await redisClient.set(cacheKey, JSON.stringify(ridesData), {
@@ -754,6 +770,8 @@ app.post('/rides', authenticate, [
     body('destination').isString().trim().notEmpty().withMessage('Destination address is required.'),
     body('fromCity').isString().trim().notEmpty().withMessage('Origin city is required.'),
     body('toCity').isString().trim().notEmpty().withMessage('Destination city is required.'),
+    body('fromSuburb').optional({ checkFalsy: true }).isString().trim(),
+    body('toSuburb').optional({ checkFalsy: true }).isString().trim(),
     body('originLat').isFloat({ min: -90, max: 90 }).withMessage('Invalid origin latitude.'),
     body('originLng').isFloat({ min: -180, max: 180 }).withMessage('Invalid origin longitude.'),
     body('destinationLat').isFloat({ min: -90, max: 90 }).withMessage('Invalid destination latitude.'),
@@ -894,53 +912,211 @@ app.get('/rides/:id', authenticate, async (req, res) => {
 });
 
 // Book a ride
-app.post('/rides/:id/book', authenticate, async (req, res) => {
+// 1. Initiate a Group Booking Invitation
+// NEW, CORRECTED, AND SMARTER LOGIC
+app.post('/rides/:id/group-invitation', authenticate, async (req, res, next) => {
   try {
     const { id: rideId } = req.params;
-    const { seats, screenshot } = req.body;
-    const passengerId = req.user.userId;
+    const { seats } = req.body;
+    const initiatorId = req.user.userId;
+    const seatsInt = parseInt(seats);
 
-    const result = await prisma.$transaction(async (tx) => {
+    if (!seatsInt || seatsInt < 1) {
+      return res.status(400).json({ error: 'Number of seats is required.' });
+    }
+
+    // --- START: SINGLE BOOKING LOGIC (seats == 1) ---
+    if (seatsInt === 1) {
+      const result = await prisma.$transaction(async (tx) => {
+        const ride = await tx.ride.findUnique({
+          where: { id: rideId },
+          include: { bookings: { where: { status: { in: ['ACCEPTED', 'PENDING'] } } } },
+        });
+
+        if (!ride) throw new Error('Ride not found');
+        if (ride.driverId === initiatorId) throw new Error('You cannot book your own ride');
+        
+        const bookedSeats = ride.bookings.length;
+        if (ride.seats - bookedSeats < 1) {
+          throw new Error('Not enough available seats');
+        }
+
+        const passenger = await tx.user.findUnique({ where: { id: initiatorId } });
+        
+        const newBooking = await tx.booking.create({
+          data: {
+            rideId: rideId,
+            userId: initiatorId,
+            status: 'PENDING', // <<< تم التصحيح: الآن يتم إرسال طلب
+          },
+        });
+
+        await sendNotificationToUser(ride.driverId, {
+          type: 'BOOKING_REQUEST',
+          relatedId: newBooking.id,
+          bookingStatus: 'PENDING',
+          data: { userName: passenger.name },
+        });
+        
+        return { booking: newBooking, isGroup: false };
+      });
+      return res.status(201).json(result);
+    }
+    // --- END: SINGLE BOOKING LOGIC ---
+
+
+    // --- START: GROUP BOOKING LOGIC (seats > 1) ---
+    const invitation = await prisma.$transaction(async (tx) => {
       const ride = await tx.ride.findUnique({
         where: { id: rideId },
-        include: { bookings: { where: { status: { in: ['ACCEPTED', 'PENDING'] } } } },
+        include: { bookings: { where: { status: { in: ['ACCEPTED', 'PENDING'] } } } }
       });
 
       if (!ride) throw new Error('Ride not found');
-      if (ride.driverId === passengerId) throw new Error('You cannot book your own ride');
-      
-      const bookedSeats = ride.bookings.reduce((sum, b) => sum + b.seatsBooked, 0);
-      if (ride.seats - bookedSeats < seats) {
-        throw new Error('Not enough available seats');
+      if (ride.driverId === initiatorId) throw new Error('You cannot book your own ride');
+
+      const bookedSeats = ride.bookings.length;
+      if (ride.seats - bookedSeats < seatsInt) {
+        throw new Error('Not enough available seats for the requested group size.');
       }
 
-      const passenger = await tx.user.findUnique({ where: { id: passengerId } });
-      
-      const newBooking = await tx.booking.create({
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+      const newInvitation = await tx.groupBookingInvitation.create({
         data: {
-          seatsBooked: parseInt(seats),
-          screenshot,
           rideId: rideId,
-          userId: passengerId,
-        },
+          initiatorId: initiatorId,
+          seats: seatsInt,
+          expiresAt: expiresAt,
+        }
       });
 
-      // إرسال إشعار للسائق مع إضافة الحالة
-      await sendNotificationToUser(ride.driverId, {
-        title: 'New Booking Request',
-        message: `New booking request from ${passenger.name}.`,
-        type: 'BOOKING_REQUEST',
-        userId: ride.driverId,
-        relatedId: newBooking.id,
-        bookingStatus: 'PENDING', // <-- ** هذا هو السطر المهم **
-      });
+      // لا نقوم بإنشاء حجز هنا، فقط الدعوة
       
-      return newBooking;
+      return { ...newInvitation, isGroup: true };
     });
-    res.status(201).json(result);
+
+    res.status(201).json(invitation);
+    // --- END: GROUP BOOKING LOGIC ---
+
   } catch (error) {
-    console.error('Book ride error:', error);
-    res.status(400).json({ error: error.message || 'Failed to book ride' });
+    next(error);
+  }
+});
+
+
+// 2. Join a Group Booking
+app.post('/invitations/:id/join', authenticate, async (req, res, next) => {
+  try {
+    const { id: invitationId } = req.params;
+    const joinerId = req.user.userId;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const invitation = await tx.groupBookingInvitation.findUnique({
+        where: { id: invitationId },
+        include: { bookings: true, ride: true }
+      });
+
+      // التحقق من صلاحية الدعوة
+      if (!invitation) throw new Error('Invitation not found.');
+      if (invitation.status !== 'PENDING') throw new Error('This invitation is no longer active.');
+      if (new Date() > invitation.expiresAt) {
+        await tx.groupBookingInvitation.update({ where: { id: invitationId }, data: { status: 'EXPIRED' } });
+        throw new Error('This invitation has expired.');
+      }
+      if (invitation.bookings.length >= invitation.seats) throw new Error('This ride is already full.');
+      if (invitation.bookings.some(b => b.userId === joinerId)) throw new Error('You have already joined this ride.');
+      
+      const joiner = await tx.user.findUnique({ where: { id: joinerId } });
+      if (!joiner || !joiner.isVerified) {
+          throw new Error('You must be a verified user to join a ride.');
+      }
+
+      // إنشاء حجز جديد للمنضم
+      await tx.booking.create({
+        data: {
+          rideId: invitation.rideId,
+          userId: joinerId,
+          invitationId: invitationId,
+          status: 'ACCEPTED', // قبول مبدئي
+        }
+      });
+
+      const updatedBookingsCount = invitation.bookings.length + 1;
+
+      // إذا اكتمل عدد المجموعة
+      if (updatedBookingsCount === invitation.seats) {
+        // تحديث حالة الدعوة
+        await tx.groupBookingInvitation.update({
+          where: { id: invitationId },
+          data: { status: 'CONFIRMED' }
+        });
+        // تحويل كل الحجوزات المرتبطة إلى PENDING لإرسالها للسائق
+        await tx.booking.updateMany({
+          where: { invitationId: invitationId },
+          data: { status: 'PENDING' }
+        });
+
+        // إرسال إشعار للسائق
+        const initiator = await tx.user.findUnique({ where: { id: invitation.initiatorId } });
+        await sendNotificationToUser(invitation.ride.driverId, {
+            type: 'BOOKING_REQUEST',
+            relatedId: invitation.bookings[0].id, // يمكن ربطه بأي حجز في المجموعة
+            bookingStatus: 'PENDING',
+            data: { userName: `${initiator.name} (+${invitation.seats - 1})` },
+        });
+      }
+
+      return { success: true, message: 'Successfully joined the ride.' };
+    });
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error); // استخدام معالج الأخطاء المركزي
+  }
+});
+
+// 3. Get Invitation and Ride Details
+app.get('/invitations/:id', authenticate, async (req, res, next) => {
+  try {
+    const { id: invitationId } = req.params;
+
+    const invitation = await prisma.groupBookingInvitation.findUnique({
+      where: { id: invitationId },
+      include: {
+        ride: {
+          include: {
+            driver: {
+              select: {
+                name: true,
+                profileImage: true,
+                rating: true,
+              }
+            }
+          }
+        },
+        bookings: { // لجلب عدد المنضمين حاليًا
+          select: {
+            userId: true
+          }
+        }
+      }
+    });
+
+    if (!invitation) {
+      throw new Error('Invitation not found.');
+    }
+
+    // التحقق من صلاحية الدعوة قبل إرسال البيانات
+    if (new Date() > invitation.expiresAt) {
+      throw new Error('This invitation has expired.');
+    }
+    if (invitation.status !== 'PENDING') {
+      throw new Error('This invitation is no longer active.');
+    }
+ 
+    res.json(invitation);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -987,12 +1163,10 @@ app.post('/rides/:id/cancel', authenticate, async (req, res) => {
         for (const booking of ride.bookings) {
           // --- START: MODIFICATION (Socket.io Notification) ---
           await sendNotificationToUser(booking.userId, {
-            title: 'Ride Cancelled',
-            message: `Your ride from ${ride.fromCity} to ${ride.toCity} has been cancelled by the driver.`,
-            type: 'RIDE_CANCELLED',
-            userId: booking.userId,
-            relatedId: rideId,
-          });
+  type: 'RIDE_CANCELLED',
+  relatedId: rideId,
+  data: { from: ride.fromCity, to: ride.toCity },
+});
           // --- END: MODIFICATION ---
         }
       } else if (passengerBooking) {
@@ -1001,14 +1175,23 @@ app.post('/rides/:id/cancel', authenticate, async (req, res) => {
           data: { status: 'CANCELLED' },
         });
         await updateStatsOnCancellation(userId, tx); // Update passenger's cancellation stats
+        const groupInvitation = await tx.groupBookingInvitation.findFirst({
+  where: { bookings: { some: { id: passengerBooking.id } } }
+});
+
+if (groupInvitation && groupInvitation.initiatorId !== userId) {
+    await sendNotificationToUser(groupInvitation.initiatorId, {
+        type: 'GROUP_MEMBER_CANCELLED', // ستحتاج لإضافة هذا النوع في ملف الترجمة
+        relatedId: ride.id,
+        data: { userName: passengerBooking.user.name, to: ride.toCity },
+    });
+}
         // --- START: MODIFICATION (Socket.io Notification) ---
         await sendNotificationToUser(ride.driverId, {
-          title: 'Booking Cancelled',
-          message: `${passengerBooking.user.name} has cancelled their booking for your ride to ${ride.toCity}.`,
-          type: 'BOOKING_CANCELLED',
-          userId: ride.driverId,
-          relatedId: passengerBooking.id,
-        });
+  type: 'BOOKING_CANCELLED',
+  relatedId: passengerBooking.id,
+  data: { userName: passengerBooking.user.name, to: ride.toCity },
+});
         // --- END: MODIFICATION ---
       }
     });
@@ -1209,14 +1392,11 @@ const responseTimeInMinutes = (new Date() - new Date(booking.createdAt)) / (1000
         }
         
         await sendNotificationToUser(booking.userId, {
-          title: 'Booking Accepted!',
-          message: `Your booking for the ride to ${booking.ride.toCity} has been accepted.`,
-          type: 'BOOKING_ACCEPTED',
-          userId: booking.userId,
-          relatedId: chat.id,
-          // *** التحسين ***: إضافة حالة الحجز مباشرة هنا
-          bookingStatus: 'ACCEPTED',
-        });
+  type: 'BOOKING_ACCEPTED',
+  relatedId: chat.id,
+  bookingStatus: 'ACCEPTED',
+  data: { to: booking.ride.toCity },
+});
 
         return { booking: updatedBooking, chat };
       });
@@ -1241,14 +1421,11 @@ const responseTimeInMinutes = (new Date() - new Date(booking.createdAt)) / (1000
         await updateStatsOnBookingResponse(bookingId, 'REJECTED', tx);
 
         await sendNotificationToUser(booking.userId, {
-          title: 'Booking Rejected',
-          message: `Your booking for the ride to ${booking.ride.toCity} has been rejected.`,
-          type: 'BOOKING_REJECTED',
-          userId: booking.userId,
-          relatedId: booking.rideId,
-          // *** التحسين ***: إضافة حالة الحجز مباشرة هنا
-          bookingStatus: 'REJECTED',
-        });
+  type: 'BOOKING_REJECTED',
+  relatedId: booking.rideId,
+  bookingStatus: 'REJECTED',
+  data: { to: booking.ride.toCity },
+});
 
         return { booking: updatedBooking };
       });
@@ -1618,12 +1795,13 @@ app.post('/chats/:id/messages', authenticate, async (req, res) => {
       const notificationType = chat.rideId === null ? 'NEW_SUPPORT_MESSAGE' : 'NEW_MESSAGE';
 
       await sendNotificationToUser(otherMember.userId, {
-          title: `New message from ${sender.name}`,
-          message: content.length > 50 ? content.substring(0, 50) + '...' : content,
-          type: notificationType,
-          userId: otherMember.userId,
-          relatedId: chatId,
-      });
+  type: notificationType,
+  relatedId: chatId,
+  data: { 
+    senderName: sender.name,
+    content: content.length > 50 ? content.substring(0, 50) + '...' : content,
+  },
+});
     }
 
     res.status(201).json(message);
@@ -2019,6 +2197,7 @@ app.post(
   }
 );
 
+if (process.env.NODE_ENV !== 'test') {
 cron.schedule('0 1 * * *', async () => {
   console.log('Running daily check for expired licenses...');
   try {
@@ -2054,6 +2233,7 @@ cron.schedule('*/5 * * * *', async () => {
         console.error('Error in scheduled rides cron job:', error);
     }
 });
+}
 
 // --- [تمت الإضافة] --- معالج الأخطاء المركزي
 const errorHandler = (error, req, res, next) => {
@@ -2083,9 +2263,11 @@ const errorHandler = (error, req, res, next) => {
 
 app.use(errorHandler);
 
-// --- START: MODIFICATION (Listen on HTTP server for Socket.io) ---
-// OLD LINE (DELETED): app.listen(PORT, () => {
-server.listen(PORT, () => {
-  // --- END: MODIFICATION ---
-  console.log(`API running on http://localhost:${PORT}`);
-});
+
+if (process.env.NODE_ENV !== 'test') {
+    server.listen(PORT, () => {
+        console.log(`API running on http://localhost:${PORT}`);
+    });
+}
+
+export { app, server };

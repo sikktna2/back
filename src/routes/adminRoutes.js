@@ -1,7 +1,7 @@
 // src/routes/adminRoutes.js
 
 import express from 'express';
-import { authenticate } from '../auth.js';
+import { authenticate, requireAdmin } from '../auth.js';
 import { 
     getUsers, 
     getUser,
@@ -21,44 +21,46 @@ import {
     updateUser,
     getChartData,
     getConfig,
-    updateConfig
+    updateConfig,
+importUsers,
 } from '../controllers/adminController.js';
 
 const router = express.Router();
 
 // --- Add authenticate middleware to ALL admin routes for security ---
 
-router.get('/dashboard-stats', authenticate, getDashboardStats);
-router.get('/unread-counts', authenticate, getUnreadCounts);
-router.post('/update-visit', authenticate, updateLastVisit);
+router.get('/dashboard-stats/:id', authenticate, requireAdmin, getDashboardStats);
+router.get('/unread-counts/:id', authenticate, requireAdmin, getUnreadCounts);
+router.post('/update-visit', authenticate, requireAdmin, updateLastVisit);
 router.get('/dashboard-charts', getChartData);
 
 // User routes
-router.get('/users', authenticate, getUsers);
-router.get('/users/:id', authenticate, getUser);
-router.put('/users/:id', authenticate, updateUser);
+router.get('/users', authenticate, requireAdmin, getUsers);
+router.post('/users/import', authenticate, requireAdmin, importUsers);
+router.get('/users/:id', authenticate, requireAdmin, getUser);
+router.put('/users/:id', authenticate, requireAdmin, updateUser);
 
 // Verification routes
-router.get('/verifications', authenticate, getVerificationRequests);
-router.put('/users/:id/verify', authenticate, respondToUserVerification);
-router.put('/cars/:id/verify', authenticate, respondToCarVerification);
+router.get('/verifications', authenticate, requireAdmin, getVerificationRequests);
+router.put('/users/:id/verify', authenticate, requireAdmin, respondToUserVerification);
+router.put('/cars/:id/verify', authenticate, requireAdmin, respondToCarVerification);
 
 // Verified User routes
-router.get('/verified-users', authenticate, getVerifiedUsers);
-router.get('/verified-users/:id', authenticate, getVerifiedUser);
+router.get('/verified-users', authenticate, requireAdmin, getVerifiedUsers);
+router.get('/verified-users/:id', authenticate, requireAdmin, getVerifiedUser);
 
 // Ride routes
-router.get('/rides', authenticate, getRides);
-router.get('/rides/:id', authenticate, getRide);
+router.get('/rides', authenticate, requireAdmin, getRides);
+router.get('/rides/:id', authenticate, requireAdmin, getRide);
 
 // Support Chat routes
-router.get('/support-chats', authenticate, getSupportChats);
-router.get('/support-chats/:id', authenticate, getSupportChat);
-router.post('/support-chats/:id/messages', authenticate, sendAdminMessage);
+router.get('/support-chats', authenticate, requireAdmin, getSupportChats);
+router.get('/support-chats/:id', authenticate, requireAdmin, getSupportChat);
+router.post('/support-chats/:id/messages', authenticate, requireAdmin, sendAdminMessage);
 
 // [MODIFICATION] The GET and PUT routes now accept an ":id" parameter to match react-admin's requests.
-router.get('/config/:id', authenticate, getConfig);
-router.put('/config/:id', authenticate, updateConfig);
+router.get('/config/:id', authenticate, requireAdmin, getConfig);
+router.put('/config/:id', authenticate, requireAdmin, updateConfig);
 
 // Report routes (assuming you will add these)
  //router.get('/reports', authenticate, getReports);

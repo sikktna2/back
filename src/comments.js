@@ -69,12 +69,10 @@ export const addRideComment = async (req, res) => {
       });
       if (ride && ride.driverId !== userId) {
         await sendNotificationToUser(ride.driverId, {
-          title: 'New Comment on Your Ride',
-          message: `${newComment.user.name} commented on your ride.`,
-          type: 'NEW_RIDE_COMMENT',
-          userId: ride.driverId,
-          relatedId: rideId,
-        });
+  type: 'NEW_RIDE_COMMENT',
+  relatedId: rideId,
+  data: { userName: newComment.user.name },
+});
       }
     } else {
       const parentComment = await prisma.rideComment.findUnique({
@@ -83,12 +81,10 @@ export const addRideComment = async (req, res) => {
       });
       if (parentComment && parentComment.userId !== userId) {
         await sendNotificationToUser(parentComment.userId, {
-          title: 'New Reply to Your Comment',
-          message: `${newComment.user.name} replied to your comment.`,
-          type: 'NEW_COMMENT_REPLY',
-          userId: parentComment.userId,
-          relatedId: rideId,
-        });
+  type: 'NEW_COMMENT_REPLY',
+  relatedId: rideId,
+  data: { userName: newComment.user.name },
+});
       }
     }
     

@@ -135,7 +135,7 @@ export const updateProfile = async (req, res) => {
   }
   try {
     const userId = req.user.userId;
-    const { name, birthDate, city, profileImage, genderPreference, preferredLanguage, darkMode, driverLicenseExpiryDate, homeAddress, homeLat, homeLng, 
+    const { name, birthDate, city, profileImage, genderPreference, rideSearchWindowDays, preferredLanguage, darkMode, driverLicenseExpiryDate, homeAddress, homeLat, homeLng, 
         workAddress, workLat, workLng  } = req.body;
 
     const updatedUser = await prisma.user.update({
@@ -147,6 +147,7 @@ export const updateProfile = async (req, res) => {
         profileImage,
         genderPreference,
         preferredLanguage,
+        rideSearchWindowDays: rideSearchWindowDays ? parseInt(rideSearchWindowDays) : undefined,
         darkMode,
         driverLicenseExpiryDate: driverLicenseExpiryDate ? new Date(driverLicenseExpiryDate) : undefined,
          homeAddress,

@@ -56,9 +56,16 @@ export const updateStatsOnRideCompletion = async (rideId, tx) => {
     }
   }
   
-  await tx.userStats.update({
+  // [MODIFICATION] Check if the completed ride was a free one offered by the driver.
+  if (ride.price === 0 && ride.rideType === 'owner') {
+    statsUpdateData.completedFreeRidesAsDriver = { increment: 1 };
+  }
+
+  // *** THE FIX: Perform all updates in one go ***
+  const updatedStats = await tx.userStats.update({
     where: { userId: driverId },
     data: statsUpdateData,
+    include: { user: true }, // Include user to check their reward eligibility
   });
 
   // Add this line to update the main user model
@@ -67,15 +74,10 @@ export const updateStatsOnRideCompletion = async (rideId, tx) => {
     data: { completedRides: { increment: 1 } },
   });
 
-  // [MODIFICATION] Check if the completed ride was a free one offered by the driver.
-  if (ride.price === 0 && ride.rideType === 'owner') {
-    statsUpdateData.completedFreeRidesAsDriver = { increment: 1 };
-  }
-
-  const updatedStats = await tx.userStats.update({
-    where: { userId: driverId },
-    data: statsUpdateData,
-    include: { user: true }, // Include user to check their reward eligibility
+  // Add this line to update the main user model
+  await tx.user.update({
+    where: { id: driverId },
+    data: { completedRides: { increment: 1 } },
   });
 
   // [MODIFICATION] After updating stats, check if the driver is now eligible for a reward.

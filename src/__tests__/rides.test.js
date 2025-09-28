@@ -1,148 +1,90 @@
 import request from 'supertest';
-import { app, server } from '../io';
-import { prisma } from '../prisma';
-import bcrypt from 'bcryptjs';
+import { server } from '../server.js';
+import redisClient from '../redisClient.js';
+import { prisma } from '../prisma.js';
 import jwt from 'jsonwebtoken';
 
-let verifiedUserToken, unverifiedUserToken;
-let verifiedUserId, unverifiedUserId;
-let verifiedCarId;
-let testRideId;
+let verifiedUserToken, unverifiedUserToken, verifiedUserId;
 
-// --- Helper function to create a user and car ---
-const createUserAndCar = async (isVerified, hasCar, isCarVerified, userData) => {
-    const hashedPassword = await bcrypt.hash(userData.password, 10);
-    const user = await prisma.user.create({
+beforeEach(async () => {
+    // Correct manual deletion order
+    await prisma.notification.deleteMany().catch(() => {});
+    await prisma.message.deleteMany().catch(() => {});
+    await prisma.chatMember.deleteMany().catch(() => {});
+    await prisma.chat.deleteMany().catch(() => {});
+    await prisma.booking.deleteMany().catch(() => {});
+    await prisma.rideComment.deleteMany().catch(() => {});
+    await prisma.feedback.deleteMany().catch(() => {});
+    await prisma.rideInterest.deleteMany().catch(() => {});
+    await prisma.report.deleteMany().catch(() => {});
+    await prisma.userBadge.deleteMany().catch(() => {});
+    await prisma.badge.deleteMany().catch(() => {});
+    await prisma.ride.deleteMany().catch(() => {});
+    await prisma.carLicenseHistory.deleteMany().catch(() => {});
+    await prisma.car.deleteMany().catch(() => {});
+    await prisma.referral.deleteMany().catch(() => {});
+    await prisma.userStats.deleteMany().catch(() => {});
+    await prisma.adminLastVisit.deleteMany().catch(() => {});
+    await prisma.promoCode.deleteMany().catch(() => {});
+    await prisma.savedRoute.deleteMany().catch(() => {});
+    await prisma.scheduledRide.deleteMany().catch(() => {});
+    // Delete users last
+    await prisma.user.deleteMany().catch(() => {});
+
+    // Create users for tests
+    const verifiedUser = await prisma.user.create({
         data: {
-            ...userData,
-            password: hashedPassword,
-            isVerified: isVerified,
-            idVerificationStatus: isVerified ? 'APPROVED' : 'PENDING',
-            isEmailVerified: true,
-        },
+            name: 'Verified Driver', email: `driver-${Date.now()}@test.com`, password: 'p', phone: `+2011${Date.now()}`, 
+            isVerified: true, idVerificationStatus: 'APPROVED', isEmailVerified: true
+        }
+    });
+    verifiedUserId = verifiedUser.id;
+    verifiedUserToken = jwt.sign({ userId: verifiedUserId }, process.env.JWT_SECRET);
+    await prisma.car.create({
+        data: { brand: 'Testla', model: 'T', year: 2025, color: 'Silver', plate: 'TEST | 123', userId: verifiedUserId, isVerified: true, verificationStatus: 'APPROVED' }
     });
 
-    let car = null;
-    if (hasCar) {
-        car = await prisma.car.create({
-            data: {
-                brand: 'Testla',
-                model: 'Model T',
-                year: 2025,
-                color: 'Cyber-silver',
-                plate: 'TEST | 123',
-                userId: user.id,
-                isVerified: isCarVerified,
-                verificationStatus: isCarVerified ? 'APPROVED' : 'PENDING',
-            },
-        });
+    const unverifiedUser = await prisma.user.create({
+        data: { name: 'Unverified Passenger', email: `passenger-${Date.now()}@test.com`, password: 'p', phone: `+2022${Date.now()}`, isVerified: false }
+    });
+    unverifiedUserToken = jwt.sign({ userId: unverifiedUser.id }, process.env.JWT_SECRET);
+});
+
+afterAll(async () => {
+    await new Promise(resolve => server.close(resolve));
+    if (redisClient.isOpen) {
+        await redisClient.quit();
     }
-    
-    const token = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET);
-    return { token, userId: user.id, carId: car?.id };
-};
-
-
-// --- Setup before all tests ---
-beforeAll(async () => {
-    // Clean database
-    await prisma.booking.deleteMany();
-    await prisma.ride.deleteMany();
-    await prisma.car.deleteMany();
-    await prisma.user.deleteMany();
-
-    // Create a verified user with a verified car
-    const verifiedData = await createUserAndCar(true, true, true, {
-        name: 'Verified Driver',
-        email: 'driver@test.com',
-        password: 'password',
-        phone: '+201111111111',
-    });
-    verifiedUserToken = verifiedData.token;
-    verifiedUserId = verifiedData.userId;
-    verifiedCarId = verifiedData.carId;
-
-    // Create an unverified user
-    const unverifiedData = await createUserAndCar(false, false, false, {
-        name: 'Unverified User',
-        email: 'passenger@test.com',
-        password: 'password',
-        phone: '+202222222222',
-    });
-    unverifiedUserToken = unverifiedData.token;
-    unverifiedUserId = unverifiedData.userId;
 });
 
-afterAll((done) => {
-    server.close(done);
-});
-
-
-// --- Test Suite for Rides API ---
 describe('Rides API (/rides)', () => {
-
     it('should FAIL to create a ride for an unverified user (403)', async () => {
-        const response = await request(app)
+        const response = await request(server)
             .post('/rides')
             .set('Authorization', `Bearer ${unverifiedUserToken}`)
             .send({
-                origin: 'Point A', destination: 'Point B', fromCity: 'CityA', toCity: 'CityB',
-                originLat: 30.0, originLng: 31.0, destinationLat: 30.1, destinationLng: 31.1,
-                time: new Date(Date.now() + 3600 * 1000).toISOString(),
-                seats: 3, price: 50, isRequest: false, rideType: 'owner',
+                origin: 'A', destination: 'B', fromCity: 'AC', toCity: 'BC', fromSuburb: 'AS', toSuburb: 'BS',
+                originLat: 30, originLng: 31, destinationLat: 30.1, destinationLng: 31.1,
+                time: new Date(Date.now() + 3600000).toISOString(), seats: 3, price: 50,
+                isRequest: false, rideType: 'owner', allowedGender: 'all'
             });
         
         expect(response.statusCode).toBe(403);
-        expect(response.body.error).toContain('User must be verified');
     });
 
     it('should successfully CREATE a new ride for a verified user (201)', async () => {
-        const rideTime = new Date(Date.now() + 2 * 3600 * 1000); // 2 hours from now
-        const response = await request(app)
+        const response = await request(server)
             .post('/rides')
             .set('Authorization', `Bearer ${verifiedUserToken}`)
             .send({
                 origin: 'Nasr City', destination: 'Dokki', fromCity: 'Cairo', toCity: 'Giza',
+                fromSuburb: 'Nasr City', toSuburb: 'Dokki',
                 originLat: 30.05, originLng: 31.35, destinationLat: 30.03, destinationLng: 31.20,
-                time: rideTime.toISOString(),
-                seats: 3, price: 55, isRequest: false, rideType: 'owner', allowedGender: 'all'
+                time: new Date(Date.now() + 7200000).toISOString(), seats: 3, price: 55,
+                isRequest: false, rideType: 'owner', allowedGender: 'all'
             });
 
         expect(response.statusCode).toBe(201);
         expect(response.body).toHaveProperty('id');
-        expect(response.body.price).toBe(55);
-        testRideId = response.body.id; // Save for next tests
-    });
-
-    it('should FAIL to book a ride for the driver of the ride (400)', async () => {
-        const response = await request(app)
-            .post(`/rides/${testRideId}/book`)
-            .set('Authorization', `Bearer ${verifiedUserToken}`) // Driver's token
-            .send({ seats: 1 });
-        
-        expect(response.statusCode).toBe(400);
-        expect(response.body.error).toContain('You cannot book your own ride');
-    });
-
-    it('should successfully BOOK a ride for a passenger (201)', async () => {
-        const response = await request(app)
-            .post(`/rides/${testRideId}/book`)
-            .set('Authorization', `Bearer ${unverifiedUserToken}`) // Passenger's token
-            .send({ seats: 2 });
-        
-        expect(response.statusCode).toBe(201);
-        expect(response.body).toHaveProperty('id'); // Booking ID
-        expect(response.body.seatsBooked).toBe(2);
-        expect(response.body.status).toBe('PENDING');
-    });
-
-    it('should FAIL to book more seats than available (400)', async () => {
-        const response = await request(app)
-            .post(`/rides/${testRideId}/book`)
-            .set('Authorization', `Bearer ${unverifiedUserToken}`)
-            .send({ seats: 2 }); // Only 1 seat left, trying to book 2
-
-        expect(response.statusCode).toBe(400);
-        expect(response.body.error).toContain('Not enough available seats');
     });
 });

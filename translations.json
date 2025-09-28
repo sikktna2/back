@@ -16,6 +16,7 @@
     "verify_email_html": "<div><h2>Hi {name},</h2><p>Thank you for registering. Use the following code to verify your email:</p><h3>{verificationToken}</h3><p>If you did not register, please ignore this email.</p></div>",
 
     "notification_titles": {
+      "NEW_RIDE_COMMENT": "New Comment on Your Ride",
       "NEW_COMMENT_ON_RIDE": "New Comment on Your Ride",
       "NEW_REPLY_TO_COMMENT": "New Reply to Your Comment",
       "NEW_BOOKING_REQUEST": "New Booking Request",
@@ -32,7 +33,15 @@
       "LEAVE_FEEDBACK": "Leave Feedback",
       "RIDE_STARTED": "Ride Started",
       "NEW_MESSAGE_TITLE": "New message from {senderName}",
-      "NEW_SUPPORT_MESSAGE_TITLE": "New Support Chat"
+      "NEW_SUPPORT_MESSAGE_TITLE": "New Support Chat",
+      "NEW_COMMENT_REPLY": "New Reply to Your Comment",
+      "BOOKING_REQUEST": "New Booking Request",
+      "BOOKING_ACCEPTED": "Booking Accepted!",
+      "BOOKING_REJECTED": "Booking Rejected",
+      "RIDE_BILL": "Ride Bill Calculated",
+      "NEW_MESSAGE": "New message from {senderName}",
+      "NEW_SUPPORT_MESSAGE": "New message from Support",
+      "REQUEST_ACCEPTED": "Your ride request was accepted!"
     },
     
     "notification_messages": {
@@ -53,7 +62,16 @@
       "LEAVE_FEEDBACK_PASSENGER": "How was your ride with {driverName}? Please leave feedback.",
       "RIDE_STARTED": "The ride from {from} to {to} has started.",
       "NEW_SUPPORT_MESSAGE_MESSAGE": "A user has started a new support conversation.",
-      "NEW_MESSAGE_MESSAGE": "{content}"
+      "NEW_MESSAGE_MESSAGE": "{content}",
+      "NEW_RIDE_COMMENT": "{userName} commented on your ride.",
+      "NEW_COMMENT_REPLY": "{userName} replied to your comment.",
+      "BOOKING_REQUEST": "{userName} has requested a seat on your ride.",
+      "BOOKING_ACCEPTED": "Your booking for the ride to {to} has been accepted.",
+      "BOOKING_REJECTED": "Your booking for the ride to {to} has been rejected.",
+      "RIDE_BILL": "The total cost was {totalPrice} EGP, split among {totalPeople}. Your share is {pricePerPerson} EGP.",
+      "NEW_SUPPORT_MESSAGE": "{content}",
+      "NEW_MESSAGE": "{content}",
+      "REQUEST_ACCEPTED": "{driverName} has accepted your request."
     }
   },
   
@@ -90,7 +108,16 @@
       "LEAVE_FEEDBACK": "أضف تقييمًا",
       "RIDE_STARTED": "بدأت الرحلة",
       "NEW_MESSAGE_TITLE": "رسالة جديدة من {senderName}",
-      "NEW_SUPPORT_MESSAGE_TITLE": "محادثة دعم فني جديدة"
+      "NEW_SUPPORT_MESSAGE_TITLE": "محادثة دعم فني جديدة",
+      "NEW_RIDE_COMMENT": "تعليق جديد على رحلتك",
+      "NEW_COMMENT_REPLY": "رد جديد على تعليقك",
+      "BOOKING_REQUEST": "طلب حجز جديد",
+      "BOOKING_ACCEPTED": "تم قبول الحجز!",
+      "BOOKING_REJECTED": "تم رفض الحجز",
+      "RIDE_BILL": "تم حساب فاتورة الرحلة",
+      "NEW_MESSAGE": "رسالة جديدة من {senderName}",
+      "NEW_SUPPORT_MESSAGE": "رسالة جديدة من الدعم الفني",
+      "REQUEST_ACCEPTED": "تم قبول طلب رحلتك!"
     },
     
     "notification_messages": {
@@ -111,7 +138,16 @@
       "LEAVE_FEEDBACK_PASSENGER": "كيف كانت رحلتك مع {driverName}؟ من فضلك أضف تقييمًا.",
       "RIDE_STARTED": "بدأت الرحلة من {from} إلى {to}.",
       "NEW_SUPPORT_MESSAGE_MESSAGE": "قام مستخدم بفتح محادثة دعم فني جديدة.",
-      "NEW_MESSAGE_MESSAGE": "{content}"
+      "NEW_MESSAGE_MESSAGE": "{content}",
+      "NEW_RIDE_COMMENT": "قام {userName} بالتعليق على رحلتك.",
+      "NEW_COMMENT_REPLY": "قام {userName} بالرد على تعليقك.",
+      "BOOKING_REQUEST": "طلب {userName} حجز مقعد في رحلتك.",
+      "BOOKING_ACCEPTED": "تم قبول حجزك للرحلة المتجهة إلى {to}.",
+      "BOOKING_REJECTED": "تم رفض حجزك للرحلة المتجهة إلى {to}.",
+      "RIDE_BILL": "إجمالي التكلفة كان {totalPrice} جنيه، مقسمة على {totalPeople}. حصتك هي {pricePerPerson} جنيه.",
+      "NEW_SUPPORT_MESSAGE": "{content}",
+      "NEW_MESSAGE": "{content}",
+      "REQUEST_ACCEPTED": "قام {driverName} بقبول طلب رحلتك."
     }
   }
 }

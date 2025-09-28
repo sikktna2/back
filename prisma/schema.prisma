@@ -1,14 +1,474 @@
-// In prisma/schema.prisma
-
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
   extensions = [postgis]
+}
+
+model User {
+  name                     String
+  email                    String             @unique
+  phone                    String             @unique
+  createdAt                DateTime           @default(now())
+  gender                   String?
+  isVerified               Boolean            @default(false)
+  password                 String
+  updatedAt                DateTime           @updatedAt
+  id                       String             @id @default(cuid())
+  birthDate                DateTime?
+  city                     String?
+  completedRides           Int                @default(0)
+  genderPreference         String             @default("all")
+   rideSearchWindowDays    Int                @default(7)
+  isPremium                Boolean            @default(false)
+  joinDate                 DateTime           @default(now())
+  profileImage             String?
+  rating                   Float              @default(0)
+  currentLat               Float?
+  currentLng               Float?
+  drivingLicenseUrl        String?
+  idBackImageUrl           String?
+  idFrontImageUrl          String?
+  autoRenew                Boolean            @default(false)
+  darkMode                 Boolean            @default(false)
+  hasSeenOnboarding        Boolean            @default(false)
+  idVerificationStatus     VerificationStatus @default(NOT_SUBMITTED)
+  nextFreeRideAt           DateTime?
+  passwordResetExpires     DateTime?
+  passwordResetToken       String?
+  preferredLanguage        String             @default("en")
+  premiumEndDate           DateTime?
+  premiumStartDate         DateTime?
+  referralCode             String?            @unique
+  profileImageLocked       Boolean            @default(false)
+  role                     String             @default("USER")
+  emailVerificationExpires DateTime?
+  emailVerificationToken   String?
+  isEmailVerified          Boolean            @default(false)
+  hasUsedFreeTrial         Boolean            @default(false)
+  isEligibleForReward      Boolean            @default(false)
+  referralsCount           Int                @default(0)
+  driverLicenseExpiryDate  DateTime?
+  homeAddress              String?
+  homeLat                  Float?
+  homeLng                  Float?
+  workAddress              String?
+  workLat                  Float?
+  workLng                  Float?
+  lastVisits               AdminLastVisit[]
+  bookings                 Booking[]
+  initiatedInvitations     GroupBookingInvitation[]   @relation("InitiatedInvitations")
+  car                      Car?
+  chats                    ChatMember[]
+  feedbacksGiven           Feedback[]         @relation("UserGivenFeedbacks")
+  feedbacksReceived        Feedback[]         @relation("UserReceivedFeedbacks")
+  messages                 Message[]
+  notifications            Notification[]
+  offers                   Offer[]
+  promoCodes               PromoCode[]
+  referralReceived         Referral?          @relation("ReferralsReceived")
+  referralsMade            Referral[]         @relation("ReferralsMade")
+  reportsReceived          Report[]           @relation("ReportsReceived")
+  reportsMade              Report[]           @relation("ReportsMade")
+  rides                    Ride[]             @relation("DriverRides")
+  comments                 RideComment[]
+  interests                RideInterest[]
+  savedRoutes              SavedRoute[]
+  scheduledRides           ScheduledRide[]
+  badges                   UserBadge[]
+  stats                    UserStats?
+}
+
+model Car {
+  id                 String              @id @default(cuid())
+  brand              String
+  model              String
+  year               Int
+  color              String
+  plate              String
+  licensePhoto       String?
+  isVerified         Boolean             @default(false)
+  userId             String              @unique
+  createdAt          DateTime            @default(now())
+  verificationStatus VerificationStatus  @default(NOT_SUBMITTED)
+  licenseExpiryDate  DateTime?
+  user               User                @relation(fields: [userId], references: [id])
+  licenseHistory     CarLicenseHistory[]
+  rides              Ride[]
+
+  @@index([isVerified])
+}
+
+model CarLicenseHistory {
+  id        String             @id @default(cuid())
+  photoUrl  String
+  status    VerificationStatus @default(PENDING)
+  notes     String?
+  createdAt DateTime           @default(now())
+  carId     String
+  car       Car                @relation(fields: [carId], references: [id])
+}
+
+model Ride {
+  id                  String                    @id @default(cuid())
+  driverId            String
+  carId               String?
+  carInfo             String?
+  serviceType         String?
+  seats               Int
+  price               Float
+  receiptPrice        Float?
+  renterScreenshotUrl String?
+  additionalInfo      String?
+  createdAt           DateTime                  @default(now())
+  startedAt           DateTime?
+  arrivedAt           DateTime?
+  time                DateTime
+  isTimeArranged      Boolean                   @default(false)
+  etaMinutes          Int?
+  destination         String
+  origin              String
+  fromCity            String
+  fromSuburb          String
+  toCity              String
+  toSuburb            String
+  fromCityNorm        String?
+  fromSuburbNorm      String?
+  toCityNorm          String?
+  toSuburbNorm        String?
+  rideType            String
+  isRequest           Boolean                   @default(false)
+  isVerified          Boolean                   @default(false)
+  isAnonymous         Boolean                   @default(false)
+  status              RideStatus                @default(UPCOMING)
+  allowedGender       String                    @default("all")
+  destinationGeom     Unsupported("geography")?
+  originGeom          Unsupported("geography")?
+  routeGeom           Unsupported("geography")?
+  destinationLat      Float
+  destinationLng      Float
+  originLat           Float
+  originLng           Float
+  polyline            String?
+  bookings            Booking[]
+  chat                Chat?
+  feedbacks           Feedback[]
+  offers              Offer[]
+  reports             Report[]
+  car                 Car?                      @relation(fields: [carId], references: [id])
+  driver              User                      @relation("DriverRides", fields: [driverId], references: [id])
+  comments            RideComment[]
+  scheduledRideId     String?
+  scheduledRide       ScheduledRide?      @relation(fields: [scheduledRideId], references: [id], onDelete: Cascade)
+  interests           RideInterest[]
+  groupInvitations    GroupBookingInvitation[]
+  @@index([status])
+  @@index([driverId])
+  @@index([time])
+  @@index([fromCityNorm, toCityNorm, time])
+  @@index([isRequest])
+}
+
+model RideInterest {
+  id        String   @id @default(cuid())
+  rideId    String
+  userId    String
+  createdAt DateTime @default(now())
+  ride      Ride     @relation(fields: [rideId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([rideId, userId])
+}
+
+model Booking {
+  id         String        @id @default(cuid())
+  rideId     String
+  userId     String // الراكب الفعلي
+  createdAt  DateTime      @default(now())
+  status     BookingStatus @default(PENDING)
+  invitationId String?
+  invitation   GroupBookingInvitation? @relation(fields: [invitationId], references: [id])
+  ride       Ride          @relation(fields: [rideId], references: [id])
+  user       User          @relation(fields: [userId], references: [id])
+  chatMember ChatMember?
+  @@unique([rideId, userId]) // منع المستخدم من حجز نفس الرحلة مرتين
+  @@index([rideId])
+  @@index([userId])
+  @@index([status])
+  @@index([invitationId])
+}
+model Offer {
+  id        String      @id @default(cuid())
+  price     Float
+  rideId    String
+  userId    String
+  createdAt DateTime    @default(now())
+  status    OfferStatus @default(PENDING)
+  ride      Ride        @relation(fields: [rideId], references: [id])
+  user      User        @relation(fields: [userId], references: [id])
+}
+
+model Chat {
+  id        String       @id @default(cuid())
+  rideId    String?      @unique
+  startedAt DateTime?
+  endedAt   DateTime?
+  createdAt DateTime     @default(now())
+  ride      Ride?        @relation(fields: [rideId], references: [id])
+  members   ChatMember[]
+  messages  Message[]
+}
+
+model ChatMember {
+  id         String   @id @default(cuid())
+  hasStarted Boolean  @default(false)
+  hasEnded   Boolean  @default(false)
+  chatId     String
+  userId     String
+  bookingId  String?  @unique
+  createdAt  DateTime @default(now())
+  booking    Booking? @relation(fields: [bookingId], references: [id])
+  chat       Chat     @relation(fields: [chatId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  content   String
+  type      String   @default("text")
+  chatId    String
+  userId    String
+  createdAt DateTime @default(now())
+  chat      Chat     @relation(fields: [chatId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model Notification {
+  id            String   @id @default(cuid())
+  title         String
+  message       String
+  type          String
+  isRead        Boolean  @default(false)
+  userId        String
+  relatedId     String?
+  createdAt     DateTime @default(now())
+  bookingStatus String?
+  user          User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, isRead, type])
+}
+
+model Feedback {
+  id            String   @id @default(cuid())
+  rating        Int
+  comment       String?
+  rideId        String
+  givenById     String
+  receivedById  String
+  createdAt     DateTime @default(now())
+  arrivalOnTime Boolean?
+  startOnTime   Boolean?
+  givenBy       User     @relation("UserGivenFeedbacks", fields: [givenById], references: [id])
+  receivedBy    User     @relation("UserReceivedFeedbacks", fields: [receivedById], references: [id])
+  ride          Ride     @relation(fields: [rideId], references: [id])
+
+  @@unique([rideId, givenById])
+}
+
+model Badge {
+  id          String      @id @default(cuid())
+  name        String
+  icon        String
+  createdAt   DateTime    @default(now())
+  description String
+  threshold   Float
+  users       UserBadge[]
+}
+
+model UserBadge {
+  id        String    @id @default(cuid())
+  userId    String
+  badgeId   String
+  createdAt DateTime  @default(now())
+  earnedAt  DateTime?
+  lostAt    DateTime?
+  progress  Float     @default(0)
+  badge     Badge     @relation(fields: [badgeId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@unique([userId, badgeId])
+}
+
+model Referral {
+  id         String   @id @default(cuid())
+  code       String
+  referrerId String
+  refereeId  String   @unique
+  bonusGiven Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  referee    User     @relation("ReferralsReceived", fields: [refereeId], references: [id])
+  referrer   User     @relation("ReferralsMade", fields: [referrerId], references: [id])
+
+  @@unique([referrerId, refereeId])
+}
+
+model AppConfig {
+  key   String @id
+  value String
+}
+
+model UserStats {
+  id                         String @id @default(cuid())
+  userId                     String @unique
+  onTimeStarts               Int    @default(0)
+  onTimeArrivals             Int    @default(0)
+  totalChatMessages          Int    @default(0)
+  fastResponses              Int    @default(0)
+  totalBookingsToAccept      Int    @default(0)
+  acceptedBookings           Int    @default(0)
+  totalCancellations         Int    @default(0)
+  totalRidesAsDriver         Int    @default(0)
+  totalRidesAsPassenger      Int    @default(0)
+  completedFreeRidesAsDriver Int    @default(0)
+  fastResponseOpportunities  Int    @default(0)
+  fastResponseSuccesses      Int    @default(0)
+  user                       User   @relation(fields: [userId], references: [id])
+}
+
+model PromoCode {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  userId    String
+  isUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model Report {
+  id             String       @id @default(cuid())
+  reason         String
+  comment        String?
+  status         ReportStatus @default(PENDING)
+  rideId         String
+  reporterId     String
+  reportedUserId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  reportedUser   User         @relation("ReportsReceived", fields: [reportedUserId], references: [id])
+  reporter       User         @relation("ReportsMade", fields: [reporterId], references: [id])
+  ride           Ride         @relation(fields: [rideId], references: [id])
+
+  @@index([rideId])
+  @@index([reporterId])
+  @@index([reportedUserId])
+}
+
+model AdminLastVisit {
+  id            String   @id @default(cuid())
+  adminId       String
+  resource      String
+  lastVisitedAt DateTime @default(now())
+  admin         User     @relation(fields: [adminId], references: [id])
+
+  @@unique([adminId, resource])
+}
+
+// NEW, CORRECTED MODEL
+model SavedRoute {
+  id                 String    @id @default(cuid())
+  name               String
+  icon               String?   // <-- تمت إضافته
+  polyline           String?
+  originAddress      String
+  originLat          Float
+  originLng          Float
+  originCity         String?   // <-- تمت إضافته
+  originSuburb       String?   // <-- تمت إضافته
+  destinationAddress String
+  destinationLat     Float
+  destinationLng     Float
+  destinationCity    String?   // <-- تمت إضافته
+  destinationSuburb  String?   // <-- تمت إضافته
+  userId             String
+  createdAt          DateTime  @default(now())
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model ScheduledRide {
+  id             String   @id @default(cuid())
+  origin         String
+  destination    String
+  fromCity       String
+  toCity         String
+  originLat      Float
+  originLng      Float
+  destinationLat Float
+  destinationLng Float
+  seats          Int
+  price          Float
+  scheduleTime   String
+  daysOfWeek     Int[]
+  isActive       Boolean  @default(true)
+  driverId       String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  fromSuburb     String?
+  toSuburb       String?
+  driver         User     @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  createdRides   Ride[]
+
+  @@index([driverId, isActive])
+}
+
+model RideComment {
+  id        String        @id @default(cuid())
+  content   String
+  createdAt DateTime      @default(now())
+  rideId    String
+  userId    String
+  parentId  String?
+  parent    RideComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   RideComment[] @relation("CommentReplies")
+  ride      Ride          @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([rideId, createdAt])
+}
+
+model GroupBookingInvitation {
+  id          String    @id @default(cuid())
+  rideId      String
+  initiatorId String // المستخدم الذي بدأ الدعوة
+  seats       Int // إجمالي عدد المقاعد المطلوبة
+  expiresAt   DateTime // وقت انتهاء صلاحية الدعوة
+  status      String    @default("PENDING") // PENDING, CONFIRMED, EXPIRED
+
+  // العلاقة العكسية مع الحجوزات الفردية
+  bookings Booking[]
+
+  ride      Ride @relation(fields: [rideId], references: [id])
+  initiator User @relation("InitiatedInvitations", fields: [initiatorId], references: [id])
+
+  @@index([rideId])
+  @@index([initiatorId])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model spatial_ref_sys {
+  srid      Int     @id
+  auth_name String? @db.VarChar(256)
+  auth_srid Int?
+  srtext    String? @db.VarChar(2048)
+  proj4text String? @db.VarChar(2048)
 }
 
 enum RideStatus {
@@ -43,438 +503,4 @@ enum ReportStatus {
   PENDING
   RESOLVED
   DISMISSED
-}
-
-model User {
-  id                       String               @id @default(cuid())
-  name                     String
-  email                    String               @unique
-  password                 String
-  phone                    String               @unique
-  gender                   String?
-  birthDate                DateTime?
-  city                     String?
-  profileImage             String?
-  profileImageLocked       Boolean              @default(false)
-  rating                   Float                @default(0)
-  completedRides           Int                  @default(0)
-  joinDate                 DateTime             @default(now())
-  genderPreference         String               @default("all")
-  isVerified               Boolean              @default(false)
-  isPremium                Boolean              @default(false)
-  hasSeenOnboarding        Boolean              @default(false)
-  preferredLanguage        String               @default("en")
-  darkMode                 Boolean              @default(false)
-  referralCode             String?              @unique
-  premiumStartDate         DateTime?
-  premiumEndDate           DateTime?
-  autoRenew                Boolean              @default(false)
-  hasUsedFreeTrial         Boolean              @default(false)
-  referralsCount           Int                  @default(0)
-  isEligibleForReward      Boolean              @default(false)
-  currentLat               Float?
-  currentLng               Float?
-  idFrontImageUrl          String?
-  idBackImageUrl           String?
-  drivingLicenseUrl        String?
-  driverLicenseExpiryDate  DateTime? // <-- هذا هو الحقل الجديد الذي تمت إضافته
-  passwordResetToken       String?
-  passwordResetExpires     DateTime?
-  emailVerificationToken   String?
-  emailVerificationExpires DateTime?
-  isEmailVerified          Boolean              @default(false)
-  idVerificationStatus     VerificationStatus   @default(NOT_SUBMITTED)
-  role                     String               @default("USER")
-  nextFreeRideAt           DateTime?
-  stats                    UserStats?
-  car                      Car?
-  rides                    Ride[]               @relation("DriverRides")
-  bookings                 Booking[]
-  offers                   Offer[]
-  notifications            Notification[]
-  feedbacksGiven           Feedback[]           @relation("UserGivenFeedbacks")
-  feedbacksReceived        Feedback[]           @relation("UserReceivedFeedbacks")
-  chats                    ChatMember[]
-  badges                   UserBadge[]
-  messages                 Message[]
-  interests                RideInterest[]
-  createdAt                DateTime             @default(now())
-  updatedAt                DateTime             @updatedAt
-  referralsMade            Referral[]           @relation("ReferralsMade")
-  referralReceived         Referral?            @relation("ReferralsReceived")
-  promoCodes               PromoCode[]
-  reportsMade              Report[]             @relation("ReportsMade")
-  reportsReceived          Report[]             @relation("ReportsReceived")
-  lastVisits               AdminLastVisit[]
-  comments                 RideComment[]
-  savedRoutes              SavedRoute[]
-  scheduledRides           ScheduledRide[]
-  homeAddress              String?
-  homeLat                  Float?
-  homeLng                  Float?
-  workAddress              String?
-  workLat                  Float?
-  workLng                  Float?
-}
-
-model Car {
-  id                 String              @id @default(cuid())
-  brand              String
-  model              String
-  year               Int
-  color              String
-  plate              String
-  licensePhoto       String?
-  isVerified         Boolean             @default(false)
-  licenseExpiryDate  DateTime?
-  verificationStatus VerificationStatus  @default(NOT_SUBMITTED)
-  userId             String              @unique
-  user               User                @relation(fields: [userId], references: [id])
-  rides              Ride[]
-  licenseHistory     CarLicenseHistory[]
-  createdAt          DateTime            @default(now())
-  @@index([isVerified])
-}
-
-model CarLicenseHistory {
-  id        String             @id @default(cuid())
-  photoUrl  String
-  status    VerificationStatus @default(PENDING)
-  notes     String?
-  createdAt DateTime           @default(now())
-  carId     String
-  car       Car                @relation(fields: [carId], references: [id])
-}
-
-model Ride {
-  id                String                           @id @default(cuid())
-  origin            String
-  destination       String
-  fromCity          String
-  fromSuburb        String
-  toCity            String
-  toSuburb          String
-  fromCityNorm      String?
-  fromSuburbNorm    String?
-  toCityNorm        String?
-  toSuburbNorm      String?
-  originLat         Float
-  originLng         Float
-  destinationLat    Float
-  destinationLng    Float
-  polyline          String?
-  originGeom        Unsupported("geography(Point, 4326)")?
-  destinationGeom   Unsupported("geography(Point, 4326)")?
-  routeGeom         Unsupported("geography(LineString, 4326)")?
-  time              DateTime
-  seats             Int
-  price             Float
-  receiptPrice      Float?
-  isTimeArranged    Boolean                          @default(false)
-  isRequest         Boolean                          @default(false)
-  rideType          String
-  isVerified        Boolean                          @default(false)
-  status            RideStatus                       @default(UPCOMING)
-  allowedGender     String                           @default("all")
-  startedAt         DateTime?
-  arrivedAt         DateTime?
-  etaMinutes        Int?
-  isAnonymous       Boolean                          @default(false)
-  additionalInfo    String?
-  serviceType       String?
-  carInfo           String?
-  renterScreenshotUrl String?
-  driverId          String
-  driver            User                             @relation("DriverRides", fields: [driverId], references: [id])
-  carId             String?
-  car               Car?                             @relation(fields: [carId], references: [id])
-  bookings          Booking[]
-  offers            Offer[]
-  chat              Chat?
-  feedbacks         Feedback[]
-  interests         RideInterest[]
-  reports           Report[]
-  createdAt         DateTime                         @default(now())
-  comments          RideComment[]
-   // --- ADDED INDEXES FOR PERFORMANCE ---
-  @@index([status])
-  @@index([driverId])
-  @@index([time])
-  @@index([fromCityNorm, toCityNorm, time]) // Compound index for search
-  @@index([isRequest])
-}
-
-model RideInterest {
-  id        String   @id @default(cuid())
-  rideId    String
-  ride      Ride     @relation(fields: [rideId], references: [id])
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  createdAt DateTime @default(now())
-
-  @@unique([rideId, userId])
-}
-
-model Booking {
-  id          String        @id @default(cuid())
-  status      BookingStatus @default(PENDING)
-  screenshot  String?
-  seatsBooked Int
-  rideId      String
-  ride        Ride          @relation(fields: [rideId], references: [id])
-  userId      String
-  user        User          @relation(fields: [userId], references: [id])
-  chatMember  ChatMember?
-  createdAt   DateTime      @default(now())
-  @@index([rideId])
-  @@index([userId])
-  @@index([status])
-}
-
-model Offer {
-  id        String      @id @default(cuid())
-  price     Float
-  status    OfferStatus @default(PENDING)
-  rideId    String
-  ride      Ride        @relation(fields: [rideId], references: [id])
-  userId    String
-  user      User        @relation(fields: [userId], references: [id])
-  createdAt DateTime    @default(now())
-}
-
-model Chat {
-  id        String       @id @default(cuid())
-  rideId    String?      @unique
-  ride      Ride?        @relation(fields: [rideId], references: [id])
-  messages  Message[]
-  members   ChatMember[]
-  startedAt DateTime?
-  endedAt   DateTime?
-  createdAt DateTime     @default(now())
-}
-
-model ChatMember {
-  id         String   @id @default(cuid())
-  hasStarted Boolean  @default(false)
-  hasEnded   Boolean  @default(false)
-  chatId     String
-  chat       Chat     @relation(fields: [chatId], references: [id])
-  userId     String
-  user       User     @relation(fields: [userId], references: [id])
-  bookingId  String?  @unique
-  booking    Booking? @relation(fields: [bookingId], references: [id])
-  createdAt  DateTime @default(now())
-}
-
-model Message {
-  id        String   @id @default(cuid())
-  content   String
-  type      String   @default("text")
-  chatId    String
-  chat      Chat     @relation(fields: [chatId], references: [id])
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  createdAt DateTime @default(now())
-}
-
-model Notification {
-  id        String   @id @default(cuid())
-  title     String
-  message   String
-  type      String
-  isRead    Boolean  @default(false)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  relatedId String?
-  bookingStatus String? // Can be PENDING, ACCEPTED, REJECTED
-  createdAt DateTime @default(now())
-  @@index([userId, isRead, type])
-}
-
-model Feedback {
-  id           String   @id @default(cuid())
-  rating       Int
-  comment      String?
-  rideId       String
-  ride         Ride     @relation(fields: [rideId], references: [id])
-  givenById    String
-  givenBy      User     @relation("UserGivenFeedbacks", fields: [givenById], references: [id])
-  receivedById String
-  receivedBy   User     @relation("UserReceivedFeedbacks", fields: [receivedById], references: [id])
-  createdAt    DateTime @default(now())
-  startOnTime     Boolean? // هل بدأ السائق في الموعد؟ (يُسأل للراكب)
-  arrivalOnTime   Boolean?
-
-  @@unique([rideId, givenById])
-}
-
-model Badge {
-  id          String      @id @default(cuid())
-  name        String
-  description String
-  icon        String
-  threshold   Float
-  users       UserBadge[]
-  createdAt   DateTime    @default(now())
-}
-
-model UserBadge {
-  id        String    @id @default(cuid())
-  progress  Float     @default(0)
-  userId    String
-  user      User      @relation(fields: [userId], references: [id])
-  badgeId   String
-  badge     Badge     @relation(fields: [badgeId], references: [id])
-  earnedAt  DateTime?
-  lostAt    DateTime?
-  createdAt DateTime  @default(now())
-
-  @@unique([userId, badgeId])
-}
-
-model Referral {
-  id         String   @id @default(cuid())
-  code       String
-  referrerId String
-  referrer   User     @relation("ReferralsMade", fields: [referrerId], references: [id])
-  refereeId  String   @unique
-  referee    User     @relation("ReferralsReceived", fields: [refereeId], references: [id])
-  bonusGiven Boolean  @default(false)
-  createdAt  DateTime @default(now())
-
-  @@unique([referrerId, refereeId])
-}
-
-model AppConfig {
-  key   String @id
-  value String
-}
-
-model UserStats {
-  id                    String @id @default(cuid())
-  userId                String @unique
-  user                  User   @relation(fields: [userId], references: [id])
-  onTimeStarts          Int    @default(0)
-  onTimeArrivals        Int    @default(0)
-  totalChatMessages     Int    @default(0)
-  fastResponses         Int    @default(0)
-  totalBookingsToAccept Int    @default(0)
-  acceptedBookings      Int    @default(0)
-  totalCancellations    Int    @default(0)
-  totalRidesAsDriver    Int    @default(0)
-  totalRidesAsPassenger Int    @default(0)
-  completedFreeRidesAsDriver  Int    @default(0)
-  fastResponseOpportunities  Int    @default(0)
-  fastResponseSuccesses      Int    @default(0)
-}
-
-model PromoCode {
-  id        String   @id @default(cuid())
-  code      String   @unique
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  isUsed    Boolean  @default(false)
-  createdAt DateTime @default(now())
-  expiresAt DateTime
-
-  @@index([userId])
-}
-
-model Report {
-  id             String       @id @default(cuid())
-  reason         String
-  comment        String?
-  status         ReportStatus @default(PENDING)
-  rideId         String
-  ride           Ride         @relation(fields: [rideId], references: [id])
-  reporterId     String
-  reporter       User         @relation("ReportsMade", fields: [reporterId], references: [id])
-  reportedUserId String
-  reportedUser   User         @relation("ReportsReceived", fields: [reportedUserId], references: [id])
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-
-  @@index([rideId])
-  @@index([reporterId])
-  @@index([reportedUserId])
-}
-
-model AdminLastVisit {
-  id            String   @id @default(cuid())
-  adminId       String
-  admin         User     @relation(fields: [adminId], references: [id])
-  resource      String // e.g., "users", "rides", "verifications"
-  lastVisitedAt DateTime @default(now())
-
-  @@unique([adminId, resource])
-}
-
-model SavedRoute {
-  id               String   @id @default(cuid())
-  name             String // e.g., "Home", "Work"
-  originAddress    String
-  originLat        Float
-  originLng        Float
-  destinationAddress String
-  destinationLat   Float
-  destinationLng   Float
-
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId           String
-  
-  createdAt        DateTime @default(now())
-
-  @@index([userId])
-}
-
-model ScheduledRide {
-  id              String    @id @default(cuid())
-  
-  // Ride Details
-  origin          String
-  destination     String
-  fromCity        String
-  toCity          String
-  originLat       Float
-  originLng       Float
-  destinationLat  Float
-  destinationLng  Float
-  seats           Int
-  price           Float
-  
-  // Scheduling Info
-  scheduleTime    String    // e.g., "08:00" in UTC
-  daysOfWeek      Int[]     // Array of integers: 0=Sunday, 1=Monday, ..., 6=Saturday
-  isActive        Boolean   @default(true)
-  
-  // Relations
-  driver          User      @relation(fields: [driverId], references: [id], onDelete: Cascade)
-  driverId        String
-  
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  
-  @@index([driverId, isActive])
-}
-
-// أضف هذا النموذج الجديد بالكامل
-model RideComment {
-  id        String   @id @default(cuid())
-  content   String
-  createdAt DateTime @default(now())
-
-  // Relation to Ride
-  rideId String
-  ride   Ride   @relation(fields: [rideId], references: [id], onDelete: Cascade)
-
-  // Relation to User
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Self-relation for replies
-  parentId  String?
-  parent    RideComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
-  replies   RideComment[] @relation("CommentReplies")
-
-  @@index([rideId, createdAt])
 }

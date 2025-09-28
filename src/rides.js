@@ -7,15 +7,22 @@ import { Prisma } from '@prisma/client';
 import { validationResult } from 'express-validator';
 
 // Helper function to normalize strings for searching
+// NEW, SMARTER NORMALIZE FUNCTION
 const normalizeString = (str) => {
   if (!str) return '';
   return str
     .toLowerCase()
-    .replace(/[\s\-_,.]+/g, ' ') // Replace multiple spaces/hyphens/etc with a single space
-    .replace(/[أإآ]/g, 'ا')      // Normalize Alef
-    .replace(/[ى]/g, 'ي')        // Normalize Yaa
-    .replace(/[ؤ]/g, 'و')        // Normalize Waw
-    .replace(/[ة]/g, 'ه')        // Normalize Taa Marbuta
+    // الخطوة 1: حذف الكلمات الإدارية غير المهمة
+    .replace(/محافظة|governorate/g, '')
+    // الخطوة 2: إزالة أي حرف غير أبجدي أو رقمي
+    .replace(/[^a-z0-9\u0621-\u064A\s]/g, '')
+    // الخطوة 3: توحيد الحروف العربية
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/[ى]/g, 'ي')
+    .replace(/[ؤ]/g, 'و')
+    .replace(/[ة]/g, 'ه')
+    // الخطوة 4: إزالة المسافات الزائدة
+    .replace(/\s+/g, ' ')
     .trim();
 };
 
@@ -32,16 +39,15 @@ const distKm = (lat1, lon1, lat2, lon2) => {
 };
 
 // --- [MODIFIED FUNCTION] ---
-export const createRide = async (req, res, next) => { // أضفنا "next" هنا
-   console.log('--- BACKEND SERVER: RECEIVED BODY ---');
-   console.log(req.body);
+// استبدل الدالة القديمة بهذه النسخة المحدثة بالكامل
+export const createRide = async (req, res, next) => {
+  console.log('--- [TEST 2] BACKEND: RECEIVED BODY ---');
+  console.log(req.body);
    
-    // --- START: NEW VALIDATION CHECK ---
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
-    // --- END: NEW VALIDATION CHECK ---
 
   try {
     const {
@@ -66,7 +72,6 @@ export const createRide = async (req, res, next) => { // أضفنا "next" هن�
         return res.status(403).json({ error: 'A verified car is required to post a ride as an owner.' });
     }
     
-    // ** THE FIX: Normalize city and suburb names before saving **
     const fromCityNorm = normalizeString(fromCity);
     const fromSuburbNorm = normalizeString(fromSuburb);
     const toCityNorm = normalizeString(toCity);
@@ -77,7 +82,6 @@ export const createRide = async (req, res, next) => { // أضفنا "next" هن�
         data: {
           origin,
           destination,
-          // ** THE FIX: Save the received city/suburb data **
           fromCity: fromCity || '',
           fromSuburb: fromSuburb || '',
           toCity: toCity || '',
@@ -106,7 +110,8 @@ export const createRide = async (req, res, next) => { // أضفنا "next" هن�
         },
       });
 
-      // This part for geospatial indexing remains the same
+      console.log(`--- [TEST 2] RIDE CREATED IN DB WITH ID: ${ride.id}`);
+
       let lineString = '';
       if (polyline) {
         const decodedPoints = polylineUtil.decode(polyline);
@@ -122,6 +127,7 @@ export const createRide = async (req, res, next) => { // أضفنا "next" هن�
         WHERE id = '${ride.id}';
       `);
       
+      console.log(`--- [TEST 2] GEOMETRY DATA UPDATED FOR RIDE ID: ${ride.id}`);
       return ride;
     });
 
@@ -194,60 +200,89 @@ export const getAvailableRides = async (req, res, next) => {
     } = req.query;
 
     const isRequestBool = isRequest === 'true';
-    let rideIds = new Set(); // Using a Set to automatically handle duplicates
+    let rideIds = new Set(); 
 
-    // --- Step 1: Geospatial Query (for high precision) ---
-    if (startLat && startLng && endLat && endLng) {
-      let timeFilterString = `AND "time" >= (NOW() AT TIME ZONE 'UTC')`;
-      if (date) {
-        const startDate = new Date(date);
-        startDate.setUTCHours(0, 0, 0, 0);
-        const endDate = new Date(startDate);
-        endDate.setUTCDate(startDate.getUTCDate() + 1);
-        timeFilterString = `AND "time" >= '${startDate.toISOString()}' AND "time" < '${endDate.toISOString()}'`;
-      }
+// --- الوسيلة الأولى: البحث الجغرافي بنطاق أوسع (5 كيلومتر) ---
+if (startLat && startLng && endLat && endLng) {
+  let timeFilterString;
+if (date) {
+  // --- START: TIMEZONE-AWARE DATE FIX ---
+  const localDate = new Date(date);
+  const startDate = new Date(Date.UTC(
+    localDate.getFullYear(),
+    localDate.getMonth(),
+    localDate.getDate(),
+    0, 0, 0, 0
+  ));
+  const endDate = new Date(startDate);
+  endDate.setUTCDate(startDate.getUTCDate() + 1);
+  timeFilterString = `AND "time" >= '${startDate.toISOString()}' AND "time" < '${endDate.toISOString()}'`;
+  // --- END: TIMEZONE-AWARE DATE FIX ---
+} else {
+  timeFilterString = `AND "time" >= (NOW() AT TIME ZONE 'UTC')`;
+}
 
-      const searchRadiusInMeters = 1000; // 1km radius
-      const geoRides = await prisma.$queryRawUnsafe(`
-            SELECT "id" FROM "Ride"
-            WHERE "status" = 'UPCOMING' AND "isRequest" = ${isRequestBool} ${timeFilterString}
-            AND ST_DWithin("originGeom", ST_SetSRID(ST_MakePoint(${startLng}, ${startLat}), 4326)::geography, ${searchRadiusInMeters})
-            AND ST_DWithin("destinationGeom", ST_SetSRID(ST_MakePoint(${endLng}, ${endLat}), 4326)::geography, ${searchRadiusInMeters})
-        `);
-      
-      if (geoRides && geoRides.length > 0) {
-        geoRides.forEach(r => rideIds.add(r.id));
-      }
-    }
+  const searchRadiusInMeters = 1000; 
+  const geoRides = await prisma.$queryRawUnsafe(`
+        SELECT "id" FROM "Ride"
+        WHERE "status" = 'UPCOMING' AND "isRequest" = ${isRequestBool} ${timeFilterString}
+        AND ST_DWithin("originGeom", ST_SetSRID(ST_MakePoint(${startLng}, ${startLat}), 4326)::geography, ${searchRadiusInMeters})
+        AND ST_DWithin("destinationGeom", ST_SetSRID(ST_MakePoint(${endLng}, ${endLat}), 4326)::geography, ${searchRadiusInMeters})
+    `);
 
-    // --- Step 2: Text-based Query by Governorate (for broader results) ---
-    if (fromGov && toGov) {
-      const whereClause = {
-        isRequest: isRequestBool,
-        status: 'UPCOMING',
-        fromCityNorm: normalizeString(fromGov),
-        toCityNorm: normalizeString(toGov),
-      };
+  if (geoRides && geoRides.length > 0) {
+    geoRides.forEach(r => rideIds.add(r.id));
+  }
+}
 
-      if (date) {
-        const startDate = new Date(date);
-        startDate.setUTCHours(0, 0, 0, 0);
-        const endDate = new Date(startDate);
-        endDate.setUTCDate(startDate.getUTCDate() + 1);
-        whereClause.time = { gte: startDate, lt: endDate };
-      } else {
-        whereClause.time = { gte: new Date() };
-      }
+// --- الوسيلة الثانية: البحث بالأسماء بشكل مرن (يحتوي على) ---
+if (fromGov && toGov) {
+  const whereClause = {
+    isRequest: isRequestBool,
+    status: 'UPCOMING',
+    fromCityNorm: {
+      contains: normalizeString(fromGov), // استخدام 'يحتوي على' بدلاً من المطابقة التامة
+      mode: 'insensitive', 
+    },
+    toCityNorm: {
+      contains: normalizeString(toGov), // استخدام 'يحتوي على' بدلاً من المطابقة التامة
+      mode: 'insensitive',
+    },
+  };
 
-      const textRides = await prisma.ride.findMany({
-        where: whereClause,
-        select: { id: true },
-      });
+  if (date) {
+    // --- START: TIMEZONE-AWARE DATE FIX ---
+// 1. Parse the incoming date string (e.g., "2025-09-29T00:00:00.000")
+const localDate = new Date(date);
 
-      if (textRides && textRides.length > 0) {
-        textRides.forEach(r => rideIds.add(r.id));
-      }
-    }
+// 2. Create the start of the day in UTC based on the local date parts
+const startDate = new Date(Date.UTC(
+  localDate.getFullYear(),
+  localDate.getMonth(),
+  localDate.getDate(),
+  0, 0, 0, 0
+));
+
+// 3. Create the end of the day by adding one full day
+const endDate = new Date(startDate);
+endDate.setUTCDate(startDate.getUTCDate() + 1);
+
+// 4. Set the where clause to search within this correct UTC range
+whereClause.time = { gte: startDate, lt: endDate };
+// --- END: TIMEZONE-AWARE DATE FIX ---
+  } else {
+    whereClause.time = { gte: new Date() };
+  }
+
+  const textRides = await prisma.ride.findMany({
+    where: whereClause,
+    select: { id: true },
+  });
+
+  if (textRides && textRides.length > 0) {
+    textRides.forEach(r => rideIds.add(r.id));
+  }
+}
 
     // --- Step 3: Fetch full data for the unique ride IDs ---
     const uniqueRideIds = Array.from(rideIds);
@@ -313,12 +348,14 @@ export const registerInterest = async (req, res) => {
     const interestedUser = await prisma.user.findUnique({ where: { id: userId } });
     if (interestedUser) {
         await sendNotificationToUser(ride.driverId, {
-            title: "New Interest in Your Ride!",
-            message: `${interestedUser.name} is interested in your ride from ${ride.fromCity} to ${ride.toCity}.`,
-            type: "NEW_INTEREST",
-            userId: ride.driverId,
-            relatedId: ride.id,
-        });
+  type: "NEW_INTEREST",
+  relatedId: ride.id,
+  data: {
+    userName: interestedUser.name,
+    from: ride.fromCity,
+    to: ride.toCity,
+  },
+});
     }
 
     res.status(201).json({ message: 'Interest registered successfully.'});
@@ -361,12 +398,13 @@ export const uploadRenterScreenshot = async (req, res) => {
 
       for (const interest of interestedUsers) {
         await sendNotificationToUser(interest.userId, {
-          title: "Ride Confirmed!",
-          message: `The renter ride from ${ride.fromCity} to ${ride.toCity} is now confirmed and ready for booking.`,
-          type: 'RIDE_CONFIRMED',
-          userId: interest.userId,
-          relatedId: ride.id,
-        });
+  type: 'RIDE_CONFIRMED',
+  relatedId: ride.id,
+  data: {
+    from: ride.fromCity,
+    to: ride.toCity,
+  },
+}); 
       }
 
       res.json({ message: 'Screenshot uploaded.', ride: updatedRide });
@@ -377,12 +415,15 @@ export const uploadRenterScreenshot = async (req, res) => {
 }
 
 // --- [MODIFIED FUNCTION] ---
-export const getLightweightMapRides = async ({ swLat, swLng, neLat, neLng, isRequest = false }) => {
+export const getLightweightMapRides = async ({ swLat, swLng, neLat, neLng, isRequest = false, userId }) => {
+
   try {
-    const rideWindowConfig = await prisma.appConfig.findUnique({
-      where: { key: 'RIDE_DATE_WINDOW_DAYS' },
-    });
-    const rideWindowDays = rideWindowConfig ? parseInt(rideWindowConfig.value, 10) : 2;
+    const user = await prisma.user.findUnique({
+  where: { id: userId },
+  select: { rideSearchWindowDays: true },
+});
+// استخدم تفضيل المستخدم، أو القيمة الافتراضية (2) إذا لم يكن موجودًا
+const rideWindowDays = user?.rideSearchWindowDays ?? 7;
 
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + rideWindowDays);
@@ -411,48 +452,51 @@ export const getLightweightMapRides = async ({ swLat, swLng, neLat, neLng, isReq
             )
     `;
 
+    console.log(`--- [TEST 3] MAP QUERY FOUND ${rides.length} RIDES.`);
+
     if (rides.length === 0) {
         return [];
     }
     
     const rideIds = rides.map(r => r.id);
-    const ridesWithRelations = await prisma.ride.findMany({
-        where: { id: { in: rideIds } },
-        select: {
-            id: true, origin: true, destination: true, originLat: true, originLng: true,
-            destinationLat: true, destinationLng: true, polyline: true, time: true,
-            seats: true, price: true, fromCity: true, fromSuburb: true, toCity: true,
-            toSuburb: true, rideType: true, serviceType: true, isAnonymous: true,
-            driver: {
-              select: {
-                id: true, name: true, profileImage: true, rating: true, completedRides: true,
-                isVerified: true, isPremium: true, gender: true,
-              }
-            },
-            car: {
-              select: {
-                id: true, brand: true, model: true, year: true, color: true, plate: true, isVerified: true,
-              }
-            },
-            bookings: {
-              where: { status: { in: ['PENDING', 'ACCEPTED'] } },
-              select: { seatsBooked: true },
-            },
-        }
-    });
+    // NEW, CORRECTED CODE BLOCK
+const ridesWithRelations = await prisma.ride.findMany({
+    where: { id: { in: rideIds } },
+    select: {
+        id: true, origin: true, destination: true, originLat: true, originLng: true,
+        destinationLat: true, destinationLng: true, polyline: true, time: true,
+        seats: true, price: true, fromCity: true, fromSuburb: true, toCity: true,
+        toSuburb: true, rideType: true, serviceType: true, isAnonymous: true,
+        driver: {
+          select: {
+            id: true, name: true, profileImage: true, rating: true, completedRides: true,
+            isVerified: true, isPremium: true, gender: true,
+          }
+        },
+        car: {
+          select: {
+            id: true, brand: true, model: true, year: true, color: true, plate: true, isVerified: true,
+          }
+        },
+        bookings: {
+          where: { status: { in: ['PENDING', 'ACCEPTED'] } },
+          select: { id: true }, // We only need to count them, so fetching 'id' is enough
+        },
+    }
+});
 
-    const ridesWithComputedSeats = ridesWithRelations.map(ride => {
-      const bookings = ride.bookings || [];
-      const bookedAndPendingSeats = bookings.reduce((sum, booking) => sum + booking.seatsBooked, 0);
-      const computedAvailableSeats = ride.seats - bookedAndPendingSeats;
-      const { bookings: _, ...rideWithoutBookings } = ride;
-      return {
-        ...rideWithoutBookings,
-        computedAvailableSeats: computedAvailableSeats,
-      };
-    });
+const ridesWithComputedSeats = ridesWithRelations.map(ride => {
+  // The new calculation is much simpler: just count the number of booking records.
+  const bookedAndPendingSeats = ride.bookings.length;
+  const computedAvailableSeats = ride.seats - bookedAndPendingSeats;
+  const { bookings: _, ...rideWithoutBookings } = ride;
+  return {
+    ...rideWithoutBookings,
+    computedAvailableSeats: computedAvailableSeats,
+  };
+});
 
-    return ridesWithComputedSeats.filter(ride => ride.computedAvailableSeats > 0);
+return ridesWithComputedSeats.filter(ride => ride.computedAvailableSeats > 0);
 
   } catch (error) {
     console.error('Get lightweight map rides DB error:', error);
