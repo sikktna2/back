@@ -61,15 +61,19 @@ export const getProfile = async (req, res) => {
 };
 
 // Get ANY user's public profile by ID
+// Get ANY user's public profile by ID
 export const getPublicProfile = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+    const { id: profileUserId } = req.params;
+    const currentUserId = req.user.userId;
 
-    await calculateAndAssignBadges(id);
+    // **** START: THE FIX ****
+    // Use the correct variable 'profileUserId' here
+    await calculateAndAssignBadges(profileUserId);
+    // **** END: THE FIX ****
 
     const userProfile = await prisma.user.findUnique({
-      where: { id },
+      where: { id: profileUserId },
       select: {
         id: true,
         name: true,
@@ -88,11 +92,11 @@ export const getPublicProfile = async (req, res) => {
             year: true,
             color: true,
             isVerified: true,
-          }
+          },
         },
         badges: { include: { badge: true } },
         feedbacksReceived: {
-          orderBy: { [sortBy]: sortOrder },
+          orderBy: { createdAt: 'desc' },
           take: 3,
           include: {
             givenBy: {
@@ -105,18 +109,46 @@ export const getPublicProfile = async (req, res) => {
           },
         },
         _count: {
-          select: { feedbacksReceived: true }
-        }
+          select: { feedbacksReceived: true },
+        },
       },
     });
 
     if (!userProfile) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
+    let friendshipStatus = 'NOT_FRIENDS';
+    let friendshipId = null;
+
+    if (currentUserId !== profileUserId) {
+      const friendship = await prisma.friendship.findFirst({
+        where: {
+          OR: [
+            { requesterId: currentUserId, addresseeId: profileUserId },
+            { requesterId: profileUserId, addresseeId: currentUserId },
+          ],
+        },
+      });
+
+      if (friendship) {
+        friendshipId = friendship.id;
+        if (friendship.status === 'ACCEPTED') {
+          friendshipStatus = 'FRIENDS';
+        } else if (friendship.status === 'PENDING') {
+          friendshipStatus =
+            friendship.requesterId === currentUserId
+              ? 'PENDING_SENT'
+              : 'PENDING_RECEIVED';
+        }
+      }
+    }
+
     const response = {
-        ...userProfile,
-        totalFeedbacks: userProfile._count.feedbacksReceived
+      ...userProfile,
+      totalFeedbacks: userProfile._count.feedbacksReceived,
+      friendshipStatus,
+      friendshipId,
     };
     delete response._count;
 
@@ -128,41 +160,81 @@ export const getPublicProfile = async (req, res) => {
 };
 
 // Update user profile information
+export const updateProfileImage = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    if (!req.file) {
+      return res.status(400).json({ error: 'No image file uploaded.' });
+    }
+
+    // --- START: NEW ARCHIVING LOGIC ---
+    await prisma.$transaction(async (tx) => {
+      // 1. Find the user and their current ID images
+      const user = await tx.user.findUnique({ where: { id: userId } });
+
+      // 2. If old ID images exist, archive them
+      if (user && user.idFrontImageUrl && user.idBackImageUrl) {
+        await tx.idVerificationHistory.create({
+          data: {
+            userId: userId,
+            idFrontImageUrl: user.idFrontImageUrl,
+            idBackImageUrl: user.idBackImageUrl,
+          },
+        });
+      }
+
+      // 3. Update the user with the new profile image and reset verification status
+      const updatedUser = await tx.user.update({
+        where: { id: userId },
+        data: {
+          profileImage: req.file.path,
+          idVerificationStatus: 'PENDING', // Reset ID verification status
+          profileImageLocked: true,        // Lock the new image
+          // Nullify old image URLs to force re-upload
+          idFrontImageUrl: null,
+          idBackImageUrl: null,
+        },
+      });
+      
+      // Send back the updated user data in the response
+      res.json({ message: 'Profile image updated, re-verification required.', user: updatedUser });
+    });
+    // --- END: NEW ARCHIVING LOGIC ---
+
+  } catch (error) {
+    console.error('Update profile image error:', error);
+    res.status(500).json({ error: 'Failed to update profile image' });
+  }
+};
+
+// In profile.js
+
+// ADD THIS ENTIRE FUNCTION
 export const updateProfile = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() });
   }
+  
   try {
     const userId = req.user.userId;
-    const { name, birthDate, city, profileImage, genderPreference, rideSearchWindowDays, preferredLanguage, darkMode, driverLicenseExpiryDate, homeAddress, homeLat, homeLng, 
-        workAddress, workLat, workLng  } = req.body;
+    const { name, birthDate, city, genderPreference, rideSearchWindowDays, driverLicenseExpiryDate, userType } = req.body;
+
+const dataToUpdate = {
+  name,
+  birthDate: birthDate ? new Date(birthDate) : undefined,
+  city,
+  genderPreference,
+  driverLicenseExpiryDate: driverLicenseExpiryDate ? new Date(driverLicenseExpiryDate) : undefined,
+  userType, // <-- تمت إضافة هذا السطر
+};
+
+    // This removes any keys with an undefined value, so we don't accidentally nullify fields.
+    Object.keys(dataToUpdate).forEach(key => dataToUpdate[key] === undefined && delete dataToUpdate[key]);
 
     const updatedUser = await prisma.user.update({
       where: { id: userId },
-      data: {
-        name,
-        birthDate: birthDate ? new Date(birthDate) : undefined,
-        city,
-        profileImage,
-        genderPreference,
-        preferredLanguage,
-        rideSearchWindowDays: rideSearchWindowDays ? parseInt(rideSearchWindowDays) : undefined,
-        darkMode,
-        driverLicenseExpiryDate: driverLicenseExpiryDate ? new Date(driverLicenseExpiryDate) : undefined,
-         homeAddress,
-        homeLat: homeLat ? parseFloat(homeLat) : undefined,
-        homeLng: homeLng ? parseFloat(homeLng) : undefined,
-        workAddress,
-        workLat: workLat ? parseFloat(workLat) : undefined,
-        workLng: workLng ? parseFloat(workLng) : undefined,
-      },
-      select: {
-        id: true, name: true, email: true, phone: true, gender: true,
-        birthDate: true, city: true, profileImage: true, genderPreference: true,
-        preferredLanguage: true, darkMode: true,
-        updatedAt: true,
-      },
+      data: dataToUpdate,
     });
 
     res.json({ message: 'Profile updated successfully', user: updatedUser });
@@ -173,7 +245,6 @@ export const updateProfile = async (req, res) => {
 };
 
 // Create or update car information
-// Create or update car information
 export const updateCar = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -182,13 +253,6 @@ export const updateCar = async (req, res) => {
   try {
     const userId = req.user.userId;
     const { brand, model, year, color, plate, licensePhoto, licenseExpiryDate } = req.body;
-
-    if (plate) {
-      const plateRegex = /^([A-Za-z\u0600-\u06FF\s]{1,7})\s*\|\s*(\d{1,4})$/;
-      if (!plate.match(plateRegex)) {
-        return res.status(400).json({ error: 'Invalid plate number format. Expected format: "ABC | 123"' });
-      }
-    }
 
     const carDataToUpdate = {};
     if (brand !== undefined) carDataToUpdate.brand = brand;
@@ -199,64 +263,45 @@ export const updateCar = async (req, res) => {
     if (licensePhoto !== undefined) carDataToUpdate.licensePhoto = licensePhoto;
     if (licenseExpiryDate !== undefined) carDataToUpdate.licenseExpiryDate = new Date(licenseExpiryDate);
 
-    if (Object.keys(carDataToUpdate).length > 0) {
-      const car = await prisma.$transaction(async (tx) => {
-        const existingCar = await tx.car.findUnique({ where: { userId } });
-        
-        // --- START: NEW ARCHIVING LOGIC ---
-        // Check if core details (not the photo itself) are being changed
-        const isCoreDataChanging = brand !== undefined || model !== undefined || year !== undefined || color !== undefined || plate !== undefined;
-        
-        // If core data is changing and there's an old license photo, archive it and clear the field
-        if (existingCar && existingCar.licensePhoto && isCoreDataChanging && licensePhoto === undefined) {
-             await tx.carLicenseHistory.create({
-                data: {
-                    carId: existingCar.id,
-                    photoUrl: existingCar.licensePhoto,
-                    status: 'PENDING', // Or you could add an 'ARCHIVED' status
-                    notes: 'Archived due to car details update.'
-                }
-            });
-            // Clear the current photo to force re-upload
-            carDataToUpdate.licensePhoto = null;
-        }
-        // --- END: NEW ARCHIVING LOGIC ---
+    // --- START: NEW LOGIC ---
+    // Get the existing car data to compare against
+    const existingCar = await prisma.car.findUnique({ where: { userId } });
 
-        // Always reset verification status on any update
+    // Check if any of the core, non-photo details are being changed
+    const isCoreDataChanging = existingCar && (
+         (carDataToUpdate.brand !== undefined && carDataToUpdate.brand !== existingCar.brand) ||
+         (carDataToUpdate.model !== undefined && carDataToUpdate.model !== existingCar.model) ||
+         (carDataToUpdate.year !== undefined && carDataToUpdate.year !== existingCar.year) ||
+         (carDataToUpdate.color !== undefined && carDataToUpdate.color !== existingCar.color) ||
+         (carDataToUpdate.plate !== undefined && carDataToUpdate.plate !== existingCar.plate)
+    );
+    
+    // Only reset verification status if core data or license photo changes
+    if (isCoreDataChanging || carDataToUpdate.licensePhoto) {
         carDataToUpdate.isVerified = false;
         carDataToUpdate.verificationStatus = 'PENDING';
+    }
+    // --- END: NEW LOGIC ---
 
-        const updatedCar = await tx.car.upsert({
-          where: { userId },
-          update: carDataToUpdate,
-          create: {
-            ...carDataToUpdate,
-            userId,
-            brand: carDataToUpdate.brand || '',
-            model: carDataToUpdate.model || '',
-            year: carDataToUpdate.year || 0,
-            color: carDataToUpdate.color || '',
-            plate: carDataToUpdate.plate || ' | ',
-          },
-        });
-
-        if (licensePhoto) {
-            await tx.carLicenseHistory.create({
-                data: {
-                    carId: updatedCar.id,
-                    photoUrl: licensePhoto,
-                    status: 'PENDING'
-                }
-            });
-        }
-        
-        return updatedCar;
+    if (Object.keys(carDataToUpdate).length > 0) {
+      const car = await prisma.car.upsert({
+        where: { userId },
+        update: carDataToUpdate,
+        create: {
+          ...carDataToUpdate,
+          userId,
+          brand: carDataToUpdate.brand || '',
+          model: carDataToUpdate.model || '',
+          year: carDataToUpdate.year || 0,
+          color: carDataToUpdate.color || '',
+          plate: carDataToUpdate.plate || ' | ',
+        },
       });
 
-      res.json({ message: 'Car details updated. Verification is pending.', car });
-
+      res.json({ message: 'Car details updated.', car });
     } else {
-      return res.status(400).json({ error: 'No valid car fields provided for update' });
+      // If no data was sent, just return success without doing anything
+      return res.status(200).json({ message: 'No car data provided for update.' });
     }
   } catch (error) {
     console.error('Update car error:', error);

@@ -320,21 +320,33 @@ export const getRide = async (req, res) => {
 export const getDashboardStats = async (req, res) => {
   try {
     // Run multiple count queries in parallel for efficiency
-    const [totalUsers, totalRides, pendingIdVerifications, pendingCarVerifications, premiumUsers] = await Promise.all([
-      prisma.user.count(),
-      prisma.ride.count(),
-      prisma.user.count({ where: { idVerificationStatus: 'PENDING' } }),
-      prisma.car.count({ where: { verificationStatus: 'PENDING' } }),
-      prisma.user.count({ where: { isPremium: true } })
-    ]);
+    const [
+  totalUsers, 
+  totalRides, 
+  pendingIdVerifications, 
+  pendingCarVerifications, 
+  premiumUsers,
+  totalPassengers, // <-- إضافة جديدة
+  totalDrivers,    // <-- إضافة جديدة
+] = await Promise.all([
+  prisma.user.count(),
+  prisma.ride.count(),
+  prisma.user.count({ where: { idVerificationStatus: 'PENDING' } }),
+  prisma.car.count({ where: { verificationStatus: 'PENDING' } }),
+  prisma.user.count({ where: { isPremium: true } }),
+  prisma.user.count({ where: { userType: 'PASSENGER' } }), // <-- إضافة جديدة
+  prisma.user.count({ where: { userType: 'DRIVER' } }),    // <-- إضافة جديدة
+]);
 
-    res.status(200).json({
-      id: 'dashboard-stats', // React Admin needs an ID
-      totalUsers,
-      totalRides,
-      pendingVerifications: pendingIdVerifications + pendingCarVerifications,
-      premiumUsers,
-    });
+res.status(200).json({
+  id: 'dashboard-stats',
+  totalUsers,
+  totalRides,
+  pendingVerifications: pendingIdVerifications + pendingCarVerifications,
+  premiumUsers,
+  totalPassengers, // <-- إضافة جديدة
+  totalDrivers,    // <-- إضافة جديدة
+});
   } catch (error) {
     console.error("Admin: Get Dashboard Stats Error:", error);
     res.status(500).json({ error: 'Failed to fetch dashboard stats.' });

@@ -41,7 +41,14 @@
       "RIDE_BILL": "Ride Bill Calculated",
       "NEW_MESSAGE": "New message from {senderName}",
       "NEW_SUPPORT_MESSAGE": "New message from Support",
-      "REQUEST_ACCEPTED": "Your ride request was accepted!"
+      "REQUEST_ACCEPTED": "Your ride request was accepted!",
+      "RIDE_OFFER": "You Have a New Ride Offer!",
+"GROUP_MEMBER_CANCELLED": "A Member Cancelled from Your Group",
+"RIDE_AUTO_CANCELLED": "Ride Automatically Cancelled",
+"FRIEND_REQUEST": "New Friend Request",
+      "FRIEND_REQUEST_ACCEPTED": "Friend Request Accepted",
+      "SUGGESTED_RIDE": "Suggested Ride Found!",
+      "SUGGESTED_REQUEST": "Suggested Request Found!"
     },
     
     "notification_messages": {
@@ -71,7 +78,14 @@
       "RIDE_BILL": "The total cost was {totalPrice} EGP, split among {totalPeople}. Your share is {pricePerPerson} EGP.",
       "NEW_SUPPORT_MESSAGE": "{content}",
       "NEW_MESSAGE": "{content}",
-      "REQUEST_ACCEPTED": "{driverName} has accepted your request."
+      "REQUEST_ACCEPTED": "{driverName} has accepted your request.",
+      "RIDE_OFFER": "{driverName} has offered to pick you up for your requested ride from {from} to {to}.",
+"GROUP_MEMBER_CANCELLED": "{userName} has cancelled their booking from your group ride to {to}.",
+"RIDE_AUTO_CANCELLED": "The ride from {from} to {to} was automatically cancelled because it did not start on time.",
+"FRIEND_REQUEST": "{userName} sent you a friend request.",
+      "FRIEND_REQUEST_ACCEPTED": "{userName} accepted your friend request.",
+      "SUGGESTED_RIDE": "We found a ride from {driverName} that passes through your requested route from {from} to {to}. Tap to view.",
+      "SUGGESTED_REQUEST": "We found a request from {passengerName} that matches your ride's route from {from} to {to}. Tap to view."
     }
   },
   
@@ -117,7 +131,14 @@
       "RIDE_BILL": "تم حساب فاتورة الرحلة",
       "NEW_MESSAGE": "رسالة جديدة من {senderName}",
       "NEW_SUPPORT_MESSAGE": "رسالة جديدة من الدعم الفني",
-      "REQUEST_ACCEPTED": "تم قبول طلب رحلتك!"
+      "REQUEST_ACCEPTED": "تم قبول طلب رحلتك!",
+      "RIDE_OFFER": "لديك عرض رحلة جديد!",
+"GROUP_MEMBER_CANCELLED": "عضو ألغى حجزه من مجموعتك",
+"RIDE_AUTO_CANCELLED": "تم إلغاء الرحلة تلقائياً",
+"FRIEND_REQUEST": "طلب صداقة جديد",
+      "FRIEND_REQUEST_ACCEPTED": "تم قبول طلب الصداقة",
+      "SUGGESTED_RIDE": "تم العثور على رحلة مقترحة!",
+      "SUGGESTED_REQUEST": "تم العثور على طلب مقترح!"
     },
     
     "notification_messages": {
@@ -147,7 +168,14 @@
       "RIDE_BILL": "إجمالي التكلفة كان {totalPrice} جنيه، مقسمة على {totalPeople}. حصتك هي {pricePerPerson} جنيه.",
       "NEW_SUPPORT_MESSAGE": "{content}",
       "NEW_MESSAGE": "{content}",
-      "REQUEST_ACCEPTED": "قام {driverName} بقبول طلب رحلتك."
+      "REQUEST_ACCEPTED": "قام {driverName} بقبول طلب رحلتك.",
+      "RIDE_OFFER": "عرض {driverName} توصيلك في رحلتك المطلوبة من {from} إلى {to}.",
+"GROUP_MEMBER_CANCELLED": "قام {userName} بإلغاء حجزه من رحلتكم الجماعية إلى {to}.",
+"RIDE_AUTO_CANCELLED": "تم إلغاء الرحلة من {from} إلى {to} تلقائياً لأنها لم تبدأ في موعدها.",
+"FRIEND_REQUEST": "أرسل لك {userName} طلب صداقة.",
+      "FRIEND_REQUEST_ACCEPTED": "قبل {userName} طلب صداقتك.",
+       "SUGGESTED_RIDE": "وجدنا رحلة من {driverName} تمر بمسار طلبك من {from} إلى {to}. اضغط للعرض.",
+      "SUGGESTED_REQUEST": "وجدنا طلبًا من {passengerName} يتوافق مع مسار رحلتك من {from} إلى {to}. اضغط للعرض."
     }
   }
 }

@@ -18,9 +18,12 @@ cloudinary.config({
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
-    folder: 'rideshare_app', // A folder name in your Cloudinary account to keep things organized
-    allowed_formats: ['jpg', 'png', 'jpeg'],
-    // transformation is optional, you can use it to resize images on upload
+    folder: 'rideshare_app', 
+    // **** START: MODIFICATION ****
+    // Add audio formats. 'm4a' is common for mobile, 'mp3' for web.
+    allowed_formats: ['jpg', 'png', 'jpeg', 'mp3', 'm4a', 'aac', 'ogg', 'mp4'],
+    resource_type: "auto", // Tell Cloudinary to detect if it's an image, video, or audio file
+    // **** END: MODIFICATION ****
     transformation: [{ width: 1024, height: 1024, crop: 'limit' }],
   },
 });

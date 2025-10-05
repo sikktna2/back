@@ -4,11 +4,98 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { prisma } from './prisma.js';
 import { sendEmail, emailTemplates } from './emailService.js'; 
+import { OAuth2Client } from 'google-auth-library'; // <-- إضافة في بداية الملف
+import axios from 'axios';
 
 const JWT_SECRET = process.env.JWT_SECRET;
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const generateReferralCode = () => {
   return Math.random().toString(36).substring(2, 10).toUpperCase();
+};
+
+async function findOrCreateUser(userData) {
+  const { email, name, profileImage, gender } = userData;
+
+  let user = await prisma.user.findUnique({ where: { email } });
+
+  if (!user) {
+    // إذا لم يكن المستخدم موجودًا، قم بإنشاء حساب جديد
+    user = await prisma.user.create({
+      data: {
+        name,
+        email,
+        phone: `social_${Date.now()}`, // رقم هاتف مؤقت وفريد
+        password: 'social_login_placeholder', // كلمة مرور مؤقتة
+        profileImage: profileImage || (gender === 'male' ? 'assets/images/male.jpg' : 'assets/images/female.jpg'),
+        gender: gender,
+        isEmailVerified: true, // البريد الإلكتروني موثوق به من جوجل/فيسبوك
+        referralCode: generateReferralCode(),
+      },
+    });
+  }
+
+  // إنشاء توكن JWT للمستخدم وإعادته
+  const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+  
+  return {
+    token,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      hasSeenOnboarding: user.hasSeenOnboarding,
+    },
+  };
+}
+
+// دالة تسجيل الدخول بجوجل
+export const googleSignIn = async (req, res) => {
+  const { token } = req.body;
+  try {
+    const ticket = await client.verifyIdToken({
+        idToken: token,
+        audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const { name, email, picture } = payload;
+    
+    const { token: jwtToken, user } = await findOrCreateUser({
+      email,
+      name,
+      profileImage: picture,
+    });
+
+    res.status(200).json({ token: jwtToken, user });
+  } catch (error) {
+    console.error("Google sign-in error:", error);
+    res.status(400).json({ error: "Invalid Google token." });
+  }
+};
+
+// دالة تسجيل الدخول بفيسبوك
+export const facebookSignIn = async (req, res) => {
+  const { token } = req.body;
+  try {
+    // التحقق من التوكن وجلب بيانات المستخدم من فيسبوك
+    const { data } = await axios.get(`https://graph.facebook.com/me?fields=id,name,email,picture,gender&access_token=${token}`);
+    
+    if (!data.email) {
+      return res.status(400).json({ error: "Facebook account has no associated email." });
+    }
+    
+    const { token: jwtToken, user } = await findOrCreateUser({
+      email: data.email,
+      name: data.name,
+      profileImage: data.picture?.data?.url,
+      gender: data.gender,
+    });
+
+    res.status(200).json({ token: jwtToken, user });
+  } catch (error) {
+    console.error("Facebook sign-in error:", error.response?.data || error.message);
+    res.status(400).json({ error: "Invalid Facebook token." });
+  }
 };
 
 export const register = async (req, res) => {
@@ -409,15 +496,21 @@ export const logout = async (req, res) => {
 export const updateUserPreferences = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { hasSeenOnboarding, preferredLanguage, darkMode } = req.body;
+    const { hasSeenOnboarding, preferredLanguage, darkMode, rideSearchWindowDays } = req.body;
 
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: {
+    const dataToUpdate = {
         hasSeenOnboarding,
         preferredLanguage,
         darkMode,
-      },
+        rideSearchWindowDays: rideSearchWindowDays ? parseInt(rideSearchWindowDays) : undefined,
+    };
+    
+    // This removes any keys with an undefined value, so we don't accidentally nullify fields.
+    Object.keys(dataToUpdate).forEach(key => dataToUpdate[key] === undefined && delete dataToUpdate[key]);
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: dataToUpdate,
     });
 
     res.json({ message: 'Preferences updated successfully', user: updatedUser });

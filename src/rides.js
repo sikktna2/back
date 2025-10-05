@@ -38,6 +38,90 @@ const distKm = (lat1, lon1, lat2, lon2) => {
   return R * c; // Distance in km
 };
 
+/**
+ * Finds and notifies users about potential partial matches for a newly created ride or request.
+ * Runs in the background after a ride/request is created.
+ * @param {object} newRide - The full ride object that was just created.
+ */
+async function findAndNotifyMatches(newRide) {
+  // Do not run matching for renter rides or if polyline is missing
+  if (newRide.rideType === 'renter' || !newRide.polyline) {
+    return;
+  }
+
+  // Determine what we are searching for
+  const searchForRequests = !newRide.isRequest; // If it's a ride, search for requests
+  const searchRadiusInMeters = 3000; // 3km radius, can be adjusted
+
+  const startPoint = `ST_SetSRID(ST_MakePoint(${newRide.originLng}, ${newRide.originLat}), 4326)::geography`;
+  const endPoint = `ST_SetSRID(ST_MakePoint(${newRide.destinationLng}, ${newRide.destinationLat}), 4326)::geography`;
+
+  try {
+    // This powerful geospatial query finds items (rides or requests) that are contained within the new ride's path
+    const query = `
+      SELECT id, "driverId"
+      FROM "Ride"
+      WHERE
+        "id" != '${newRide.id}' AND          -- Exclude the ride itself
+        "status" = 'UPCOMING' AND           -- Must be an active item
+        "isRequest" = ${searchForRequests} AND -- Search for the opposite type
+        "routeGeom" IS NOT NULL AND
+        -- Check if the item's start point is near the new ride's route
+        ST_DWithin("originGeom", ${startPoint}, ${searchRadiusInMeters}) AND
+        -- Check if the item's end point is near the new ride's route
+        ST_DWithin("destinationGeom", ${endPoint}, ${searchRadiusInMeters}) AND
+        -- Ensure the start point comes before the end point along the new ride's path
+        ST_LineLocatePoint("routeGeom", ST_ClosestPoint("originGeom", "routeGeom")) < ST_LineLocatePoint("routeGeom", ST_ClosestPoint("destinationGeom", "routeGeom"));
+    `;
+
+    const matches = await prisma.$queryRawUnsafe(query);
+
+    if (matches.length > 0) {
+      console.log(`[Matching Service] Found ${matches.length} potential matches for ride ${newRide.id}.`);
+
+      const newRideCreator = await prisma.user.findUnique({ where: { id: newRide.driverId } });
+
+      for (const match of matches) {
+        const matchedItemCreator = await prisma.user.findUnique({ where: { id: match.driverId } });
+        
+        if (newRide.isRequest) {
+          // The new item is a REQUEST, so we found a matching RIDE
+          const ride = await prisma.ride.findUnique({ where: { id: match.id } });
+          // Notify the passenger (who created the request)
+          await sendNotificationToUser(newRide.driverId, {
+            type: 'SUGGESTED_RIDE',
+            relatedId: ride.id, // Link to the suggested ride
+            data: { driverName: matchedItemCreator.name, from: ride.fromCity, to: ride.toCity },
+          });
+          // Notify the driver (who owns the ride)
+          await sendNotificationToUser(ride.driverId, {
+            type: 'SUGGESTED_REQUEST',
+            relatedId: newRide.id, // Link to the new request
+            data: { passengerName: newRideCreator.name, from: newRide.fromCity, to: newRide.toCity },
+          });
+        } else {
+          // The new item is a RIDE, so we found a matching REQUEST
+          const request = await prisma.ride.findUnique({ where: { id: match.id } });
+          // Notify the driver (who created the ride)
+          await sendNotificationToUser(newRide.driverId, {
+            type: 'SUGGESTED_REQUEST',
+            relatedId: request.id, // Link to the suggested request
+            data: { passengerName: matchedItemCreator.name, from: request.fromCity, to: request.toCity },
+          });
+          // Notify the passenger (who owns the request)
+          await sendNotificationToUser(request.driverId, {
+            type: 'SUGGESTED_RIDE',
+            relatedId: newRide.id, // Link to the new ride
+            data: { driverName: newRideCreator.name, from: newRide.fromCity, to: newRide.toCity },
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`[Matching Service] Error finding matches for ride ${newRide.id}:`, error);
+  }
+}
+
 // --- [MODIFIED FUNCTION] ---
 // استبدل الدالة القديمة بهذه النسخة المحدثة بالكامل
 export const createRide = async (req, res, next) => {
@@ -133,6 +217,22 @@ export const createRide = async (req, res, next) => {
 
     res.status(201).json(newRide);
 
+    // **** START: MODIFICATION ****
+    // Trigger the background matching service without waiting for it to finish
+    findAndNotifyMatches(newRide).catch(e => console.error("Background matching failed:", e));
+    // **** END: MODIFICATION ****
+
+    // Trigger background matching job (this can be a separate function)
+    (async () => {
+        if (newRide.isRequest) {
+            // Find rides that match this request
+            // For each match, send 'SUGGESTED_RIDE' notification
+        } else {
+            // Find requests that match this ride
+            // For each match, send 'SUGGESTED_REQUEST' notification
+        }
+    })().catch(e => console.error("Background matching failed:", e));
+
   } catch (error) {
     console.error('Create ride error:', error);
     res.status(500).json({ error: 'Failed to create ride' });
@@ -153,10 +253,9 @@ export const getUserRides = async (req, res) => {
 
     if (type === 'upcoming') {
       whereClause.status = { in: ['UPCOMING', 'IN_PROGRESS'] };
-    } else if (type === 'completed') {
-      whereClause.status = 'COMPLETED';
-    } else if (type === 'cancelled') {
-      whereClause.status = 'CANCELLED';
+     } else if (type === 'completed') {
+      // Now fetches both completed and cancelled rides for the "completed" tab
+      whereClause.status = { in: ['COMPLETED', 'CANCELLED'] };
     }
 
     const orderBy = (type === 'completed' || type === 'cancelled')
@@ -190,102 +289,43 @@ export const getUserRides = async (req, res) => {
 // --- [REVISED AND IMPROVED FUNCTION] ---
 export const getAvailableRides = async (req, res, next) => {
   try {
-    const {
-      startLat, startLng, endLat, endLng,
-      fromGov, toGov,
-      date,
-      sortBy = 'time',
-      sortOrder = 'asc',
-      isRequest = 'false',
-    } = req.query;
+    const { startLat, startLng, endLat, endLng, fromGov, toGov, date, sortBy = 'time', sortOrder = 'asc', isRequest = 'false' } = req.query;
 
     const isRequestBool = isRequest === 'true';
-    let rideIds = new Set(); 
+    let finalRideIds = new Set();
+    const searchRadiusInMeters = 2000; // 2km radius for pickup/dropoff
 
-// --- الوسيلة الأولى: البحث الجغرافي بنطاق أوسع (5 كيلومتر) ---
-if (startLat && startLng && endLat && endLng) {
-  let timeFilterString;
-if (date) {
-  // --- START: TIMEZONE-AWARE DATE FIX ---
-  const localDate = new Date(date);
-  const startDate = new Date(Date.UTC(
-    localDate.getFullYear(),
-    localDate.getMonth(),
-    localDate.getDate(),
-    0, 0, 0, 0
-  ));
-  const endDate = new Date(startDate);
-  endDate.setUTCDate(startDate.getUTCDate() + 1);
-  timeFilterString = `AND "time" >= '${startDate.toISOString()}' AND "time" < '${endDate.toISOString()}'`;
-  // --- END: TIMEZONE-AWARE DATE FIX ---
-} else {
-  timeFilterString = `AND "time" >= (NOW() AT TIME ZONE 'UTC')`;
-}
+    // --- Phase 1: Direct and Partial Geospatial Search ---
+    if (startLat && startLng && endLat && endLng) {
+      const passengerStartPoint = `ST_SetSRID(ST_MakePoint(${startLng}, ${startLat}), 4326)::geography`;
+      const passengerEndPoint = `ST_SetSRID(ST_MakePoint(${endLng}, ${endLat}), 4326)::geography`;
 
-  const searchRadiusInMeters = 1000; 
-  const geoRides = await prisma.$queryRawUnsafe(`
-        SELECT "id" FROM "Ride"
-        WHERE "status" = 'UPCOMING' AND "isRequest" = ${isRequestBool} ${timeFilterString}
-        AND ST_DWithin("originGeom", ST_SetSRID(ST_MakePoint(${startLng}, ${startLat}), 4326)::geography, ${searchRadiusInMeters})
-        AND ST_DWithin("destinationGeom", ST_SetSRID(ST_MakePoint(${endLng}, ${endLat}), 4326)::geography, ${searchRadiusInMeters})
-    `);
-
-  if (geoRides && geoRides.length > 0) {
-    geoRides.forEach(r => rideIds.add(r.id));
-  }
-}
-
-// --- الوسيلة الثانية: البحث بالأسماء بشكل مرن (يحتوي على) ---
-if (fromGov && toGov) {
-  const whereClause = {
-    isRequest: isRequestBool,
-    status: 'UPCOMING',
-    fromCityNorm: {
-      contains: normalizeString(fromGov), // استخدام 'يحتوي على' بدلاً من المطابقة التامة
-      mode: 'insensitive', 
-    },
-    toCityNorm: {
-      contains: normalizeString(toGov), // استخدام 'يحتوي على' بدلاً من المطابقة التامة
-      mode: 'insensitive',
-    },
-  };
-
-  if (date) {
-    // --- START: TIMEZONE-AWARE DATE FIX ---
-// 1. Parse the incoming date string (e.g., "2025-09-29T00:00:00.000")
-const localDate = new Date(date);
-
-// 2. Create the start of the day in UTC based on the local date parts
-const startDate = new Date(Date.UTC(
-  localDate.getFullYear(),
-  localDate.getMonth(),
-  localDate.getDate(),
-  0, 0, 0, 0
-));
-
-// 3. Create the end of the day by adding one full day
-const endDate = new Date(startDate);
-endDate.setUTCDate(startDate.getUTCDate() + 1);
-
-// 4. Set the where clause to search within this correct UTC range
-whereClause.time = { gte: startDate, lt: endDate };
-// --- END: TIMEZONE-AWARE DATE FIX ---
-  } else {
-    whereClause.time = { gte: new Date() };
-  }
-
-  const textRides = await prisma.ride.findMany({
-    where: whereClause,
-    select: { id: true },
-  });
-
-  if (textRides && textRides.length > 0) {
-    textRides.forEach(r => rideIds.add(r.id));
-  }
-}
-
-    // --- Step 3: Fetch full data for the unique ride IDs ---
-    const uniqueRideIds = Array.from(rideIds);
+      let timeFilterString = `AND "time" >= (NOW() AT TIME ZONE 'UTC')`;
+      if (date) {
+        const localDate = new Date(date);
+        const startDate = new Date(Date.UTC(localDate.getFullYear(), localDate.getMonth(), localDate.getDate()));
+        const endDate = new Date(startDate);
+        endDate.setUTCDate(startDate.getUTCDate() + 1);
+        timeFilterString = `AND "time" >= '${startDate.toISOString()}' AND "time" < '${endDate.toISOString()}'`;
+      }
+      
+      const partialMatchQuery = `
+        SELECT id
+        FROM "Ride"
+        WHERE
+          "status" = 'UPCOMING' AND "isRequest" = ${isRequestBool} ${timeFilterString}
+          AND "routeGeom" IS NOT NULL
+          AND ST_DWithin("routeGeom", ${passengerStartPoint}, ${searchRadiusInMeters})
+          AND ST_DWithin("routeGeom", ${passengerEndPoint}, ${searchRadiusInMeters})
+          AND ST_LineLocatePoint("routeGeom", ST_ClosestPoint("routeGeom", ${passengerStartPoint})) < ST_LineLocatePoint("routeGeom", ST_ClosestPoint("routeGeom", ${passengerEndPoint}))
+      `;
+      
+      const matchedRides = await prisma.$queryRawUnsafe(partialMatchQuery);
+      matchedRides.forEach(r => finalRideIds.add(r.id));
+    }
+    
+    // --- Step 2: Fetch full data for the unique ride IDs ---
+    const uniqueRideIds = Array.from(finalRideIds);
     if (uniqueRideIds.length === 0) {
       return res.json([]);
     }
@@ -293,32 +333,38 @@ whereClause.time = { gte: startDate, lt: endDate };
     const ridesWithRelations = await prisma.ride.findMany({
       where: { id: { in: uniqueRideIds } },
       include: {
-        driver: {
-          select: {
-            id: true, name: true, profileImage: true, rating: true,
-            completedRides: true, isVerified: true, isPremium: true, gender: true,
-            badges: { include: { badge: true } }
-          }
-        },
+        driver: { select: { id: true, name: true, profileImage: true, rating: true, completedRides: true, isVerified: true } },
         bookings: { where: { status: { in: ['ACCEPTED', 'PENDING'] } } },
       },
       orderBy: { [sortBy]: sortOrder },
     });
-
-    // --- Step 4. Process and return the final list ---
+    
+    // --- Step 3. Process rides for partial pricing and return ---
     const processedRides = ridesWithRelations.map(ride => {
-      const bookedAndPendingSeats = ride.bookings.reduce((sum, b) => sum + b.seatsBooked, 0);
+      const isDirectMatch = distKm(ride.originLat, ride.originLng, parseFloat(startLat), parseFloat(startLng)) < 2 && distKm(ride.destinationLat, ride.destinationLng, parseFloat(endLat), parseFloat(endLng)) < 2;
+      let finalPrice = ride.price;
+
+      if (!isDirectMatch) {
+        const rideTotalDistance = ride.routeDistanceKm; // Assuming you add this field
+        const passengerDistance = distKm(parseFloat(startLat), parseFloat(startLng), parseFloat(endLat), parseFloat(endLng));
+        if (rideTotalDistance > 0) {
+            const calculatedPrice = ride.price * (passengerDistance / rideTotalDistance);
+            finalPrice = Math.ceil(calculatedPrice / 5) * 5; // Round up to nearest 5
+        }
+      }
+      
       const { bookings, ...rideWithoutBookings } = ride;
       return {
         ...rideWithoutBookings,
-        computedAvailableSeats: ride.seats - bookedAndPendingSeats,
+        computedAvailableSeats: ride.seats - bookings.length,
+        isPartialMatch: !isDirectMatch,
+        partialPrice: finalPrice,
       };
     });
 
     res.json(processedRides.filter(r => r.computedAvailableSeats > 0));
-
   } catch (error) {
-    next(error); // Pass error to the central handler
+    next(error);
   }
 };
 
@@ -398,13 +444,13 @@ export const uploadRenterScreenshot = async (req, res) => {
 
       for (const interest of interestedUsers) {
         await sendNotificationToUser(interest.userId, {
-  type: 'RIDE_CONFIRMED',
-  relatedId: ride.id,
-  data: {
-    from: ride.fromCity,
-    to: ride.toCity,
-  },
-}); 
+          type: 'RIDE_CONFIRMED',
+          relatedId: ride.id,
+          data: {
+            from: ride.fromCity,
+            to: ride.toCity,
+          },
+        });
       }
 
       res.json({ message: 'Screenshot uploaded.', ride: updatedRide });
@@ -416,34 +462,32 @@ export const uploadRenterScreenshot = async (req, res) => {
 
 // --- [MODIFIED FUNCTION] ---
 export const getLightweightMapRides = async ({ swLat, swLng, neLat, neLng, isRequest = false, userId }) => {
-
   try {
     const user = await prisma.user.findUnique({
-  where: { id: userId },
-  select: { rideSearchWindowDays: true },
-});
-// استخدم تفضيل المستخدم، أو القيمة الافتراضية (2) إذا لم يكن موجودًا
-const rideWindowDays = user?.rideSearchWindowDays ?? 7;
+      where: { id: userId },
+      select: { rideSearchWindowDays: true },
+    });
+    const rideWindowDays = user?.rideSearchWindowDays ?? 7;
 
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + rideWindowDays);
-
     const boundingBox = `POLYGON((${swLng} ${swLat}, ${neLng} ${swLat}, ${neLng} ${neLat}, ${swLng} ${neLat}, ${swLng} ${swLat}))`;
     
-    // ** THE FIX: Convert the 'isRequest' string from the query into a boolean for Prisma **
     const isRequestBool = (isRequest === true || isRequest === 'true');
+
 
     const rides = await prisma.$queryRaw`
         SELECT 
             "id", "origin", "destination", "fromCity", "fromSuburb", "toCity", "toSuburb", 
             "originLat", "originLng", "destinationLat", "destinationLng", "polyline", 
             "time", "seats", "price", "rideType", "serviceType", "isAnonymous", 
-            "driverId", "carId"
+            "driverId", "carId", "status"::text
         FROM "Ride"
         WHERE
-            "status" = 'UPCOMING' AND
-            "isRequest" = ${isRequestBool} AND -- ** THE FIX: Use the boolean value here **
-            "time" >= (NOW() AT TIME ZONE 'UTC') AND
+            "status" IN ('UPCOMING', 'IN_PROGRESS') AND
+            "isRequest" = ${isRequestBool} AND
+            -- This line is the crucial fix. It tells PostgreSQL to calculate the time itself.
+            "time" >= (NOW() AT TIME ZONE 'UTC' - INTERVAL '3 hours') AND
             "time" <= ${endDate} AND 
             (
                 ST_Intersects("originGeom", ST_GeomFromText(${boundingBox}, 4326)) OR
@@ -451,52 +495,52 @@ const rideWindowDays = user?.rideSearchWindowDays ?? 7;
                 ST_Intersects("routeGeom", ST_GeomFromText(${boundingBox}, 4326))
             )
     `;
-
-    console.log(`--- [TEST 3] MAP QUERY FOUND ${rides.length} RIDES.`);
+    // --- END: NEW LOGIC ---
+    console.log(`[BACKEND TEST] Database returned ${rides.length} rides.`);
 
     if (rides.length === 0) {
         return [];
     }
     
     const rideIds = rides.map(r => r.id);
-    // NEW, CORRECTED CODE BLOCK
-const ridesWithRelations = await prisma.ride.findMany({
-    where: { id: { in: rideIds } },
-    select: {
-        id: true, origin: true, destination: true, originLat: true, originLng: true,
-        destinationLat: true, destinationLng: true, polyline: true, time: true,
-        seats: true, price: true, fromCity: true, fromSuburb: true, toCity: true,
-        toSuburb: true, rideType: true, serviceType: true, isAnonymous: true,
-        driver: {
-          select: {
-            id: true, name: true, profileImage: true, rating: true, completedRides: true,
-            isVerified: true, isPremium: true, gender: true,
-          }
-        },
-        car: {
-          select: {
-            id: true, brand: true, model: true, year: true, color: true, plate: true, isVerified: true,
-          }
-        },
-        bookings: {
-          where: { status: { in: ['PENDING', 'ACCEPTED'] } },
-          select: { id: true }, // We only need to count them, so fetching 'id' is enough
-        },
-    }
-});
+    const ridesWithRelations = await prisma.ride.findMany({
+      where: { id: { in: rideIds } },
+      select: {
+          id: true, origin: true, destination: true, originLat: true, originLng: true,
+          destinationLat: true, destinationLng: true, polyline: true, time: true,
+          seats: true, price: true, fromCity: true, fromSuburb: true, toCity: true,
+          toSuburb: true, rideType: true, serviceType: true, isAnonymous: true, status: true,
+          driver: {
+            select: {
+              id: true, name: true, profileImage: true, rating: true, completedRides: true,
+              isVerified: true, isPremium: true, gender: true,
+              currentLat: true, // جلب موقع السائق الحي
+              currentLng: true
+            }
+          },
+          car: {
+            select: {
+              id: true, brand: true, model: true, year: true, color: true, plate: true, isVerified: true,
+            }
+          },
+          bookings: {
+            where: { status: { in: ['PENDING', 'ACCEPTED', 'GROUP_PENDING'] } },
+            select: { id: true },
+          },
+      }
+    });
 
-const ridesWithComputedSeats = ridesWithRelations.map(ride => {
-  // The new calculation is much simpler: just count the number of booking records.
-  const bookedAndPendingSeats = ride.bookings.length;
-  const computedAvailableSeats = ride.seats - bookedAndPendingSeats;
-  const { bookings: _, ...rideWithoutBookings } = ride;
-  return {
-    ...rideWithoutBookings,
-    computedAvailableSeats: computedAvailableSeats,
-  };
-});
+    const ridesWithComputedSeats = ridesWithRelations.map(ride => {
+      const bookedAndPendingSeats = ride.bookings.length;
+      const computedAvailableSeats = ride.seats - bookedAndPendingSeats;
+      const { bookings: _, ...rideWithoutBookings } = ride;
+      return {
+        ...rideWithoutBookings,
+        computedAvailableSeats: computedAvailableSeats,
+      };
+    });
 
-return ridesWithComputedSeats.filter(ride => ride.computedAvailableSeats > 0);
+    return ridesWithComputedSeats.filter(ride => ride.computedAvailableSeats > 0);
 
   } catch (error) {
     console.error('Get lightweight map rides DB error:', error);
@@ -540,5 +584,52 @@ export const updateRidePrice = async (req, res) => {
   } catch (error) {
     console.error('Update ride price error:', error);
     res.status(500).json({ error: 'Failed to update ride price.' });
+  }
+};
+
+// استبدل الدالة القديمة بالكامل
+// أضف هذه الدالة الجديدة بالكامل في نهاية الملف
+export const offerToPickup = async (req, res, next) => {
+  try {
+    const { rideRequestId } = req.params;
+    const { driverRideId } = req.body; // <-- استقبال ID رحلة السائق
+    const offeringDriverId = req.user.userId;
+
+    if (!driverRideId) {
+      return res.status(400).json({ error: 'Driver ride ID is required.' });
+    }
+
+    // جلب كل البيانات المطلوبة في استعلام واحد لتحسين الأداء
+    const [rideRequest, offeringDriver, driverRide] = await Promise.all([
+      prisma.ride.findUnique({ where: { id: rideRequestId } }),
+      prisma.user.findUnique({ where: { id: offeringDriverId } }),
+      prisma.ride.findUnique({ where: { id: driverRideId } }),
+    ]);
+    
+    // التحقق من صلاحية البيانات
+    if (!rideRequest || !rideRequest.isRequest) {
+      return res.status(404).json({ error: 'Ride request not found.' });
+    }
+    
+    if (!driverRide || driverRide.driverId !== offeringDriverId) {
+        return res.status(403).json({ error: 'The selected ride is not valid or does not belong to you.' });
+    }
+
+    const passengerId = rideRequest.driverId; // في الطلبات، الراكب هو "سائق" الطلب
+
+    // إرسال إشعار للراكب صاحب الطلب مع تفاصيل العرض
+    await sendNotificationToUser(passengerId, {
+      type: 'RIDE_OFFER', // نوع إشعار جديد
+      relatedId: driverRide.id, // ربط الإشعار برحلة السائق المعروضة
+      data: {
+        driverName: offeringDriver.name,
+        from: driverRide.fromCity,
+        to: driverRide.toCity,
+      },
+    });
+
+    res.status(200).json({ message: 'Offer sent successfully.' });
+  } catch (error) {
+    next(error); // تمرير أي خطأ للمعالج المركزي
   }
 };
